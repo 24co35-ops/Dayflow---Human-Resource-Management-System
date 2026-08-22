@@ -69,6 +69,11 @@ export type DayflowPayroll = {
   standard_allowance: number
   performance_bonus: number
   deductions: number
+  pf_contribution: number
+  professional_tax: number
+  leave_travel_allowance: number
+  fixed_allowance: number
+  gross_salary: number
   net_salary: number
   payable_days: number
   attendance_days: number

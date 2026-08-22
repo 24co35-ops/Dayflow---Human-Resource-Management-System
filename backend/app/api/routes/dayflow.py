@@ -8,6 +8,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from app.dayflow_payroll import SalaryConfig, SalaryComponentConfig, calculate_salary
+
 router = APIRouter(prefix="/dayflow", tags=["dayflow"])
 
 Role = Literal["employee", "hr", "admin"]
@@ -139,6 +141,11 @@ class PayrollSnapshot(BaseModel):
     standard_allowance: int
     performance_bonus: int
     deductions: int
+    pf_contribution: int
+    professional_tax: int
+    leave_travel_allowance: int
+    fixed_allowance: int
+    gross_salary: int
     net_salary: int
     payable_days: int
     attendance_days: int
@@ -249,10 +256,43 @@ seed_leave_requests = [item.model_copy(deep=True) for item in leave_requests]
 
 
 salary_by_profile = {
-    "emp-001": (45000, 10000, 4167, 3750, 3200),
-    "emp-002": (48000, 12000, 4167, 4000, 3500),
-    "emp-003": (62000, 15000, 4167, 5000, 4500),
-    "emp-004": (38000, 8000, 4167, 3167, 2700),
+    "emp-001": SalaryConfig(
+        wage=50000,
+        pf_rate=12,
+        professional_tax=200,
+        components=[
+            SalaryComponentConfig(name="basic", computation_type="percentage", value=50, base="wage"),
+            SalaryComponentConfig(name="hra", computation_type="percentage", value=50, base="basic"),
+            SalaryComponentConfig(name="standard_allowance", computation_type="fixed", value=4167),
+            SalaryComponentConfig(name="performance_bonus", computation_type="percentage", value=8.33, base="basic"),
+            SalaryComponentConfig(name="leave_travel_allowance", computation_type="percentage", value=8.33, base="basic"),
+            SalaryComponentConfig(name="fixed_allowance", computation_type="fixed", value=0),
+        ],
+    ),
+    "emp-002": SalaryConfig(wage=60000, components=[
+        SalaryComponentConfig(name="basic", computation_type="percentage", value=50),
+        SalaryComponentConfig(name="hra", computation_type="percentage", value=50, base="basic"),
+        SalaryComponentConfig(name="standard_allowance", computation_type="fixed", value=4167),
+        SalaryComponentConfig(name="performance_bonus", computation_type="percentage", value=8.33, base="basic"),
+        SalaryComponentConfig(name="leave_travel_allowance", computation_type="percentage", value=8.33, base="basic"),
+        SalaryComponentConfig(name="fixed_allowance", computation_type="fixed", value=0),
+    ]),
+    "emp-003": SalaryConfig(wage=76000, components=[
+        SalaryComponentConfig(name="basic", computation_type="percentage", value=50),
+        SalaryComponentConfig(name="hra", computation_type="percentage", value=50, base="basic"),
+        SalaryComponentConfig(name="standard_allowance", computation_type="fixed", value=4167),
+        SalaryComponentConfig(name="performance_bonus", computation_type="percentage", value=8.33, base="basic"),
+        SalaryComponentConfig(name="leave_travel_allowance", computation_type="percentage", value=8.33, base="basic"),
+        SalaryComponentConfig(name="fixed_allowance", computation_type="fixed", value=0),
+    ]),
+    "emp-004": SalaryConfig(wage=42000, components=[
+        SalaryComponentConfig(name="basic", computation_type="percentage", value=50),
+        SalaryComponentConfig(name="hra", computation_type="percentage", value=50, base="basic"),
+        SalaryComponentConfig(name="standard_allowance", computation_type="fixed", value=4167),
+        SalaryComponentConfig(name="performance_bonus", computation_type="percentage", value=8.33, base="basic"),
+        SalaryComponentConfig(name="leave_travel_allowance", computation_type="percentage", value=8.33, base="basic"),
+        SalaryComponentConfig(name="fixed_allowance", computation_type="fixed", value=0),
+    ]),
 }
 
 
@@ -361,6 +401,39 @@ def _generated_employee_code(full_name: str, joining_year: int) -> str:
 
 def _overlaps(left_start: date, left_end: date, right_start: date, right_end: date) -> bool:
     return left_start <= right_end and right_start <= left_end
+
+
+def _payroll_days(profile_id: str) -> tuple[int, int]:
+    period_year, period_month = date.today().year, date.today().month
+    attended = sum(
+        1 if item.status == "present" else 0.5
+        for item in attendance
+        if item.profile_id == profile_id
+        and item.attendance_date.year == period_year
+        and item.attendance_date.month == period_month
+        and item.status in ("present", "half_day")
+    )
+    paid_leave = sum(
+        item.days
+        for item in leave_requests
+        if item.profile_id == profile_id
+        and item.status == "approved"
+        and item.leave_type != "unpaid"
+        and item.start_date.year == period_year
+        and item.start_date.month == period_month
+    )
+    unpaid_leave = sum(
+        item.days
+        for item in leave_requests
+        if item.profile_id == profile_id
+        and item.status == "approved"
+        and item.leave_type == "unpaid"
+        and item.start_date.year == period_year
+        and item.start_date.month == period_month
+    )
+    scheduled_days = 22
+    payable_days = max(0, min(scheduled_days, round(attended + paid_leave - unpaid_leave)))
+    return payable_days, scheduled_days
 
 
 _restore_state()
@@ -558,24 +631,29 @@ def get_payroll(
     snapshots: list[PayrollSnapshot] = []
     for selected_id in selected_ids:
         profile = _profile(selected_id)
-        basic, hra, standard, bonus, deductions = salary_by_profile.get(
-            selected_id, (45000, 10000, 4167, 3750, 3200)
-        )
+        config = salary_by_profile.get(selected_id, salary_by_profile["emp-001"])
+        payable_days, scheduled_days = _payroll_days(selected_id)
+        breakdown = calculate_salary(config, payable_days=payable_days, scheduled_days=scheduled_days)
         snapshots.append(
             PayrollSnapshot(
                 profile_id=profile.id,
                 employee_name=profile.full_name,
                 employee_code=profile.employee_code,
-                period_year=2026,
-                period_month=8,
-                basic_salary=basic,
-                hra_allowance=hra,
-                standard_allowance=standard,
-                performance_bonus=bonus,
-                deductions=deductions,
-                net_salary=basic + hra + standard + bonus - deductions,
-                payable_days=22,
-                attendance_days=22,
+                period_year=date.today().year,
+                period_month=date.today().month,
+                basic_salary=breakdown.basic_salary,
+                hra_allowance=breakdown.hra_allowance,
+                standard_allowance=breakdown.standard_allowance,
+                performance_bonus=breakdown.performance_bonus,
+                deductions=breakdown.deductions,
+                pf_contribution=breakdown.pf_contribution,
+                professional_tax=breakdown.professional_tax,
+                leave_travel_allowance=breakdown.leave_travel_allowance,
+                fixed_allowance=breakdown.fixed_allowance,
+                gross_salary=breakdown.gross_salary,
+                net_salary=breakdown.net_salary,
+                payable_days=payable_days,
+                attendance_days=scheduled_days,
             )
         )
     return snapshots
