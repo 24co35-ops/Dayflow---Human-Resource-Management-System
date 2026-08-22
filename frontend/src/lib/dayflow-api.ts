@@ -41,6 +41,22 @@ export type DayflowLeave = {
   reviewed_at: string | null
 }
 
+export type DayflowPayroll = {
+  profile_id: string
+  employee_name: string
+  employee_code: string
+  period_year: number
+  period_month: number
+  basic_salary: number
+  hra_allowance: number
+  standard_allowance: number
+  performance_bonus: number
+  deductions: number
+  net_salary: number
+  payable_days: number
+  attendance_days: number
+}
+
 export type DayflowActivity = {
   id: string
   actor_id: string
@@ -146,6 +162,7 @@ export function createDayflowClient(actor: DayflowActor) {
     checkIn: () => request<DayflowAttendance>(`/attendance/check-in?${query}`, actor, { method: "POST" }),
     checkOut: () => request<DayflowAttendance>(`/attendance/check-out?${query}`, actor, { method: "POST" }),
     getLeaves: () => request<DayflowLeave[]>(`/leave-requests?${query}`, actor),
+    getPayroll: () => request<DayflowPayroll[]>(`/payroll?${query}`, actor),
     createLeave: (input: DayflowLeaveInput) =>
       request<DayflowLeave>(`/leave-requests?${query}`, actor, {
         method: "POST",

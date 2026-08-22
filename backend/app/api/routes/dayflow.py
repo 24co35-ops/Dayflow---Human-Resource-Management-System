@@ -110,6 +110,22 @@ class FlowResponse(BaseModel):
     action: dict[str, object] | None = None
 
 
+class PayrollSnapshot(BaseModel):
+    profile_id: str
+    employee_name: str
+    employee_code: str
+    period_year: int
+    period_month: int
+    basic_salary: int
+    hra_allowance: int
+    standard_allowance: int
+    performance_bonus: int
+    deductions: int
+    net_salary: int
+    payable_days: int
+    attendance_days: int
+
+
 class ActivityEvent(BaseModel):
     id: str
     actor_id: str
@@ -211,6 +227,14 @@ leave_requests = [
 activity_events: list[ActivityEvent] = []
 seed_attendance = [item.model_copy(deep=True) for item in attendance]
 seed_leave_requests = [item.model_copy(deep=True) for item in leave_requests]
+
+
+salary_by_profile = {
+    "emp-001": (45000, 10000, 4167, 3750, 3200),
+    "emp-002": (48000, 12000, 4167, 4000, 3500),
+    "emp-003": (62000, 15000, 4167, 5000, 4500),
+    "emp-004": (38000, 8000, 4167, 3167, 2700),
+}
 
 
 def _persistence_enabled() -> bool:
@@ -443,6 +467,39 @@ def check_out(actor: DemoActor = Depends(get_dayflow_actor)) -> Attendance:
         f"{profile.full_name} checked out after {record.worked_minutes} minutes",
     )
     return record
+
+
+@router.get("/payroll", response_model=list[PayrollSnapshot])
+def get_payroll(
+    actor: DemoActor = Depends(get_dayflow_actor), profile_id: str | None = None
+) -> list[PayrollSnapshot]:
+    selected_ids = [actor.profile_id]
+    if actor.role in ("hr", "admin"):
+        selected_ids = [profile_id] if profile_id else [item.id for item in profiles]
+    snapshots: list[PayrollSnapshot] = []
+    for selected_id in selected_ids:
+        profile = _profile(selected_id)
+        basic, hra, standard, bonus, deductions = salary_by_profile.get(
+            selected_id, (45000, 10000, 4167, 3750, 3200)
+        )
+        snapshots.append(
+            PayrollSnapshot(
+                profile_id=profile.id,
+                employee_name=profile.full_name,
+                employee_code=profile.employee_code,
+                period_year=2026,
+                period_month=8,
+                basic_salary=basic,
+                hra_allowance=hra,
+                standard_allowance=standard,
+                performance_bonus=bonus,
+                deductions=deductions,
+                net_salary=basic + hra + standard + bonus - deductions,
+                payable_days=22,
+                attendance_days=22,
+            )
+        )
+    return snapshots
 
 
 @router.get("/activity", response_model=list[ActivityEvent])
