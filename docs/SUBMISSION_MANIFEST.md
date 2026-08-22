@@ -22,6 +22,8 @@ Start at the frontend root route `/`. The initial Employee view presents the wor
 | `docs/EXECUTION_PLAN_2026-08-22.md` | 10:30 AM–3:30 PM IST build window and milestone cadence |
 | `docs/IMPLEMENTATION_CHECKLIST.md` | Requirement-to-artifact mapping and verification gates |
 | `docs/TEAM_RUNBOOK.md` | Branch, review, authorship, and demo reset protocol |
+| `docs/API_REFERENCE.md` | Endpoint catalog, payloads, errors, and Flow action contract |
+| `docs/SUPABASE_SETUP.md` | Supabase project, migration, Realtime, and production checklist |
 | `supabase/migrations/202608220001_dayflow_schema.sql` | Supabase schema, RLS policies, indexes, and Realtime publication tables |
 
 ## Validation evidence
@@ -36,5 +38,6 @@ The frontend TypeScript compiler completes without errors and Vite produces a pr
 | `b7fda0b` | 10:31:12 | `24co35-ops` | Flow, leave approval workflow, validated leave form, Supabase client boundary, navigation, QA suite |
 | `2b1d985` | 10:31:22 | `24co35-ops` | Remove generated test cache and isolate validation artifacts |
 | `264836d` | 10:31:59 | `24co35-ops` | Finalize hackathon runbook and implementation checklist |
+| `3a95d08` | 10:33:22 | `24co35-ops` | Final delivery evidence |
 
 The current authenticated GitHub session is `24co35-ops`. `ShivamGawade-XS` is verified as a collaborator on the repository, but no active Shivam credentials are available in this session. The manifest therefore records authorship truthfully instead of fabricating a second account’s commits. To make the history display a genuine Shivam commit, he should push one feature branch from his own authenticated GitHub session and the coordinator can merge it.

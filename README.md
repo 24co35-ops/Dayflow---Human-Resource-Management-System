@@ -56,6 +56,10 @@ docs/
   DATA_MODEL.md
   DEMO_SCRIPT.md
   EXECUTION_PLAN_2026-08-22.md
+  API_REFERENCE.md
+  SUPABASE_SETUP.md
+  IMPLEMENTATION_CHECKLIST.md
+  TEAM_RUNBOOK.md
 supabase/migrations/
   202608220001_dayflow_schema.sql
 backend/app/api/routes/dayflow.py
@@ -75,7 +79,7 @@ Dayflow’s foundation and design decisions were informed by the following open-
 
 ## Contribution workflow
 
-Use feature branches and meaningful commits. A contributor should run the frontend typecheck/build and the backend test suite before opening a change. The repository keeps the hackathon execution plan and demo script in `docs/` so a new teammate can understand the product and record the final walkthrough without reverse-engineering the code.
+Use feature branches and meaningful commits. A contributor should run the frontend typecheck/build and the backend test suite before opening a change. The repository keeps the hackathon execution plan, API reference, Supabase setup guide, implementation checklist, and demo script in `docs/` so a new teammate can understand the product, connect the cloud data boundary, and record the final walkthrough without reverse-engineering the code.
 
 ## License
 
