@@ -56,6 +56,8 @@ export type DayflowLeave = {
   review_comment: string | null
   reviewer_id: string | null
   reviewed_at: string | null
+  attachment_name: string | null
+  attachment_size: number | null
 }
 
 export type DayflowPayroll = {
@@ -123,6 +125,8 @@ export type DayflowLeaveInput = {
   start_date: string
   end_date: string
   remarks?: string
+  attachment_name?: string
+  attachment_size?: number
 }
 
 export class DayflowApiError extends Error {

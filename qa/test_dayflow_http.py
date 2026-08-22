@@ -247,3 +247,36 @@ def test_http_employee_cannot_provision_or_read_another_profile(client: TestClie
 
     profile_response = client.get("/api/v1/dayflow/people/emp-002", headers=headers)
     assert profile_response.status_code == 403
+
+
+def test_http_leave_attachment_metadata_is_validated(client: TestClient) -> None:
+    headers = {
+        "X-Dayflow-Demo-Role": "employee",
+        "X-Dayflow-Demo-Profile-Id": "emp-001",
+    }
+    invalid = client.post(
+        "/api/v1/dayflow/leave-requests",
+        headers=headers,
+        json={
+            "leave_type": "sick",
+            "start_date": "2026-10-01",
+            "end_date": "2026-10-01",
+            "attachment_name": "certificate.exe",
+            "attachment_size": 1200,
+        },
+    )
+    assert invalid.status_code == 422
+
+    accepted = client.post(
+        "/api/v1/dayflow/leave-requests",
+        headers=headers,
+        json={
+            "leave_type": "sick",
+            "start_date": "2026-10-02",
+            "end_date": "2026-10-02",
+            "attachment_name": "certificate.pdf",
+            "attachment_size": 1200,
+        },
+    )
+    assert accepted.status_code == 201
+    assert accepted.json()["attachment_name"] == "certificate.pdf"

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.dayflow_payroll import SalaryConfig, SalaryComponentConfig, calculate_salary
 
@@ -100,6 +100,8 @@ class LeaveRequest(BaseModel):
     review_comment: str | None = None
     reviewer_id: str | None = None
     reviewed_at: datetime | None = None
+    attachment_name: str | None = None
+    attachment_size: int | None = None
 
 
 class LeaveCreate(BaseModel):
@@ -107,6 +109,18 @@ class LeaveCreate(BaseModel):
     start_date: date
     end_date: date
     remarks: str = Field(default="", max_length=500)
+    attachment_name: str | None = Field(default=None, max_length=160)
+    attachment_size: int | None = Field(default=None, ge=1, le=5_000_000)
+
+    @model_validator(mode="after")
+    def validate_attachment(self) -> "LeaveCreate":
+        if self.attachment_name:
+            extension = self.attachment_name.lower().rsplit(".", 1)[-1] if "." in self.attachment_name else ""
+            if extension not in {"pdf", "png", "jpg", "jpeg"}:
+                raise ValueError("Leave attachments must be PDF, PNG, JPG, or JPEG")
+            if self.attachment_size is None:
+                raise ValueError("Attachment size is required when a leave attachment is supplied")
+        return self
 
     def validate_dates(self) -> None:
         if self.end_date < self.start_date:
