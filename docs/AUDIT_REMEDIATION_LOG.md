@@ -15,6 +15,7 @@
 | RLS allowed a broad profile self-update policy | Replaced it with safe employee and HR policies, added a security-definer trigger for role/employee-code/email changes, and split attendance update policies | Migration guard asserts the broad policy is absent | `4c9a5d6` |
 | Header identity and active navigation were hardcoded or contradictory | Shared shell now follows the selected employee/HR demo context, persists the selection locally, and derives active navigation from the current hash | Frontend typecheck and Vite build | `8155e17` |
 | Audit findings had no durable implementation order | Published evidence-backed backlog and this commit-to-finding log | Repository documentation | `28964a5` |
+| Hosted Python 3.14 migration could not resolve the inherited User/Item forward reference | Made both SQLModel relationship sides explicit and revalidated mapper configuration locally | `check_dayflow_models.py` plus backend QA | `7f90037` |
 
 ## Validation evidence
 
