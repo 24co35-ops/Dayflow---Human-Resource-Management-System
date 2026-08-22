@@ -32,3 +32,26 @@ Payroll values, Flow action execution, realtime subscriptions, and append-only a
 ## Next recommended slice
 
 Build one typed Dayflow client and persistence adapter behind an explicit `DAYFLOW_DEMO_MODE` boundary. Wire the employee check-in, leave request, HR approval, and activity refresh flows to that adapter with loading/error states. Only after that contract is stable should the implementation replace the adapter with Supabase calls and verified auth context.
+
+## Full-remediation progress after the initial audit slice
+
+| Finding | Remediation | Evidence | Commit |
+| --- | --- | --- | --- |
+| Dashboard mutations were local-only | Added typed actor-aware client and React Query hooks for attendance, leave, Flow, payroll, people, and invalidation. The UI uses the API when `VITE_DAYFLOW_API_ENABLED=true` and clearly retains offline fixtures otherwise. | `frontend/src/lib/dayflow-api.ts`, `frontend/src/hooks/useDayflow.ts`, dashboard build | `548ec09`, `35df6ea` |
+| Demo workflow state disappeared on refresh/process reuse | Added explicit JSON persistence for attendance, leave, and activity plus a protected HR/Admin reset endpoint. | `test_demo_state_round_trips_to_disk`, API reference | `fa3e34c` |
+| Payroll values were fixed in the frontend | Added actor-scoped `/payroll` snapshots and wired the payroll preview and generated PDF to server snapshot values with fixture fallback. | Payroll HTTP scope test and frontend build | `910c76c` |
+| People directory was fixed in the frontend | Added HR/Admin-only `/people` endpoint and server-profile mapping in the HR directory. | People endpoint authorization test and frontend build | `3717187`, `582e471` |
+| Browser workflow coverage was scaffold-only for Dayflow | Added Playwright coverage for Flow leave draft/confirmation and employee/HR role-shell consistency. | `frontend/tests/dayflow.spec.ts` discovery succeeds; full container run requires Docker | `9dfbb3b` |
+| Containerized E2E did not receive Dayflow mode | Added Docker Vite build argument and compose override flags for explicit API-backed demo mode. | Compose/Docker configuration inspection; Docker runtime unavailable in this sandbox | `9dfbb3b` |
+
+## Current validation evidence
+
+The isolated Dayflow suite now reports **30 passed** tests. Backend compilation passes with `python3 -m compileall -q backend/app`. The frontend production build passes with TypeScript compilation and Vite bundling. The Playwright spec is discovered successfully with the existing authenticated project. The sandbox does not contain a Docker executable, so Docker Compose configuration and the full containerized browser run could not be executed locally.
+
+## Remaining boundaries after this implementation
+
+The dashboard is now capable of using a real FastAPI-backed demo data plane, but the default build remains offline unless `VITE_DAYFLOW_API_ENABLED=true` is supplied. The demo actor headers are intentionally not production authentication. The JSON persistence adapter is not a transactional database and does not provide cross-process locking.
+
+The Supabase schema and RLS hardening remain source-controlled but are not claimed as deployed. A production completion still requires a verified Supabase JWT dependency, UUID-backed repository implementation, transactional persistence, live Realtime subscriptions, and deployment verification. Payroll is server-owned inside the demo adapter but remains seeded fixture compensation rather than a live payroll engine.
+
+The inherited whole-backend coverage job still has its own 90% gate and should not be declared green based on the isolated Dayflow suite. Existing scaffold Playwright/auth and Docker checks may require the repository’s hosted Docker environment for final verification.
