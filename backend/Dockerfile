@@ -12,8 +12,9 @@ RUN bun install
 COPY ./frontend /app/frontend
 
 ARG VITE_API_URL=
+ARG VITE_DAYFLOW_API_ENABLED=false
 
-RUN bun run build
+RUN VITE_API_URL=$VITE_API_URL VITE_DAYFLOW_API_ENABLED=$VITE_DAYFLOW_API_ENABLED bun run build
 
 
 FROM python:3.14

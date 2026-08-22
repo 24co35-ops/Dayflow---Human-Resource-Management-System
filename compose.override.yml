@@ -37,6 +37,9 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        VITE_API_URL: ""
+        VITE_DAYFLOW_API_ENABLED: "true"
     # command: sleep infinity  # Infinite loop to keep container alive doing nothing
     command:
       - fastapi
@@ -67,6 +70,9 @@ services:
       SMTP_HOST: "mailpit"
       SMTP_PORT: "1025"
       SMTP_TLS: "false"
+      DAYFLOW_DEMO_MODE: "true"
+      DAYFLOW_PERSIST_DEMO_STATE: "true"
+      DAYFLOW_STATE_FILE: "/tmp/dayflow-demo-state.json"
 
   mailpit:
     image: axllent/mailpit
@@ -89,6 +95,7 @@ services:
       - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD:?Variable not set}
       - PLAYWRIGHT_BASE_URL=http://backend:8000
       - VITE_API_URL=http://backend:8000
+      - VITE_DAYFLOW_API_ENABLED=true
       - MAILPIT_HOST=http://mailpit:8025
       # For the reports when run locally
       - PLAYWRIGHT_HTML_HOST=0.0.0.0

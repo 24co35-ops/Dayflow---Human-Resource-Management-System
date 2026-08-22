@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { CalendarDays, Send } from "lucide-react"
+import { useState } from "react"
 import { useForm } from "react-hook-form"
-import { toast } from "sonner"
 import { z } from "zod"
 
 import { Button } from "@/components/ui/button"
@@ -19,25 +19,26 @@ const leaveSchema = z.object({
 })
 
 type FormValues = z.infer<typeof leaveSchema>
-type LeaveDraft = { id: string; name: string; initials: string; type: string; dates: string; days: number; status: "pending"; tone: string }
+export type LeaveDraft = { id: string; name: string; initials: string; type: string; dates: string; days: number; status: "pending"; tone: string; startDate: string; endDate: string; remarks: string; attachmentName?: string; attachmentSize?: number }
 
-export function LeaveRequestForm({ onSubmit }: { onSubmit: (leave: LeaveDraft) => void }) {
+export function LeaveRequestForm({ onSubmit }: { onSubmit: (leave: LeaveDraft) => void | Promise<void> }) {
   const { register, handleSubmit, formState: { errors, isSubmitting }, reset } = useForm<FormValues>({
     resolver: zodResolver(leaveSchema),
     defaultValues: { type: "Paid time off", remarks: "" },
   })
+  const [attachment, setAttachment] = useState<File | null>(null)
 
-  const submit = (values: FormValues) => {
+  const submit = async (values: FormValues) => {
     const start = new Date(`${values.startDate}T00:00:00`)
     const end = new Date(`${values.endDate}T00:00:00`)
     const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1
-    onSubmit({ id: `leave-${Date.now()}`, name: "Arjun Singh", initials: "AS", type: values.type, dates: `${start.toLocaleDateString("en-IN", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-IN", { month: "short", day: "numeric" })}`, days, status: "pending", tone: "bg-[#d8efbd] text-[#3c6c32]" })
+    await onSubmit({ id: `leave-${Date.now()}`, name: "Arjun Singh", initials: "AS", type: values.type, dates: `${start.toLocaleDateString("en-IN", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-IN", { month: "short", day: "numeric" })}`, days, status: "pending", tone: "bg-[#d8efbd] text-[#3c6c32]", startDate: values.startDate, endDate: values.endDate, remarks: values.remarks ?? "", attachmentName: attachment?.name, attachmentSize: attachment?.size })
     reset()
-    toast.success("Leave request submitted for HR review")
+    setAttachment(null)
   }
 
   return <form className="rounded-2xl border border-[#dfe5e0] bg-white p-5 shadow-sm sm:p-6" onSubmit={handleSubmit(submit)}>
     <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]"><CalendarDays className="size-4 text-[#6f9a4a]" /> New request</div><h3 className="mt-2 font-display text-xl font-semibold tracking-[-0.04em]">Take time to reset</h3><p className="mt-1 text-xs text-[#8b959e]">Your request stays pending until HR reviews it.</p></div><Button className="rounded-xl bg-[#0e1c2f]" disabled={isSubmitting} type="submit"><Send className="mr-2 size-3.5" /> Send request</Button></div>
-    <div className="mt-5 grid gap-3 sm:grid-cols-3"><label className="space-y-1.5 text-xs font-semibold text-[#5c6872]">Type<select className="h-10 w-full rounded-xl border border-[#dfe5e0] bg-white px-3 text-sm font-normal text-[#1e2c40] outline-none focus:ring-2 focus:ring-[#c7f36b]" {...register("type")}><option>Paid time off</option><option>Sick leave</option><option>Unpaid leave</option></select></label><label className="space-y-1.5 text-xs font-semibold text-[#5c6872]">From<Input type="date" {...register("startDate")} />{errors.startDate && <span className="font-normal text-[#b55b4a]">{errors.startDate.message}</span>}</label><label className="space-y-1.5 text-xs font-semibold text-[#5c6872]">To<Input type="date" {...register("endDate")} />{errors.endDate && <span className="font-normal text-[#b55b4a]">{errors.endDate.message}</span>}</label></div><label className="mt-3 block space-y-1.5 text-xs font-semibold text-[#5c6872]">Remarks <textarea className="min-h-20 w-full rounded-xl border border-[#dfe5e0] bg-white px-3 py-2 text-sm font-normal text-[#1e2c40] outline-none placeholder:text-[#a1aab0] focus:ring-2 focus:ring-[#c7f36b]" placeholder="Add a note for your manager (optional)" {...register("remarks")} /></label>
+    <div className="mt-5 grid gap-3 sm:grid-cols-3"><label className="space-y-1.5 text-xs font-semibold text-[#5c6872]">Type<select className="h-10 w-full rounded-xl border border-[#dfe5e0] bg-white px-3 text-sm font-normal text-[#1e2c40] outline-none focus:ring-2 focus:ring-[#c7f36b]" {...register("type")}><option>Paid time off</option><option>Sick leave</option><option>Unpaid leave</option></select></label><label className="space-y-1.5 text-xs font-semibold text-[#5c6872]" htmlFor="leave-start-date">From<Input id="leave-start-date" type="date" {...register("startDate")} />{errors.startDate && <span className="font-normal text-[#b55b4a]">{errors.startDate.message}</span>}</label><label className="space-y-1.5 text-xs font-semibold text-[#5c6872]" htmlFor="leave-end-date">To<Input id="leave-end-date" type="date" {...register("endDate")} />{errors.endDate && <span className="font-normal text-[#b55b4a]">{errors.endDate.message}</span>}</label></div><label className="mt-3 block space-y-1.5 text-xs font-semibold text-[#5c6872]">Remarks <textarea className="min-h-20 w-full rounded-xl border border-[#dfe5e0] bg-white px-3 py-2 text-sm font-normal text-[#1e2c40] outline-none placeholder:text-[#a1aab0] focus:ring-2 focus:ring-[#c7f36b]" placeholder="Add a note for your manager (optional)" {...register("remarks")} /></label><label className="mt-3 block space-y-1.5 text-xs font-semibold text-[#5c6872]">Certificate <input accept=".pdf,.png,.jpg,.jpeg" className="block w-full rounded-xl border border-dashed border-[#cfd8cf] px-3 py-2 text-xs font-normal" onChange={(event) => { const file = event.target.files?.[0] ?? null; setAttachment(file && file.size <= 5_000_000 ? file : null) }} type="file" />{attachment && <span className="font-normal text-[#4e793b]">Attached: {attachment.name}</span>}<span className="font-normal text-[#8b959e]">Optional metadata only in demo mode; maximum 5 MB.</span></label>
   </form>
 }

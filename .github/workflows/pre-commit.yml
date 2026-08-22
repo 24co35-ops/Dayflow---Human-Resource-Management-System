@@ -12,7 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     timeout-minutes: 5
     steps:
       - name: Dump GitHub context
@@ -71,25 +70,8 @@ jobs:
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Get PR Push token
-        id: pr-push
-        if: env.CAN_PUSH == 'true' && steps.changes.outputs.changed == 'true'
-        uses: tiangolo/pr-push@4c31924988b7c8edac04c09526a3b8a1b25a8b3a # 0.0.3
-      - name: Commit and push changes
-        if: env.CAN_PUSH == 'true' && steps.changes.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ steps.pr-push.outputs.token }}
-        run: |
-          git config user.name "pr-push[bot]"
-          git config user.email "pr-push[bot]@users.noreply.github.com"
-          gh auth setup-git
-          git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "🎨 Auto format and update with pre-commit"
-            git push
-          fi
+      # Formatting changes are intentionally not pushed by CI. A failed check must
+      # be fixed in a reviewed commit, rather than mutating a contributor branch.
       - uses: pre-commit-ci/lite-action@5d6cc0eb514c891a40562a58a8e71576c5c7fb43 # v1.1.0
         if: env.CAN_PUSH == 'false'
         with:

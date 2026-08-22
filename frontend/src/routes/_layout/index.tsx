@@ -25,12 +25,23 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { AsyncState } from "@/components/AsyncState"
-import { LeaveRequestForm } from "@/components/LeaveRequestForm"
+import { EmployeeProvisioningForm } from "@/components/EmployeeProvisioningForm"
+import { LeaveRequestForm, type LeaveDraft } from "@/components/LeaveRequestForm"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import {
+  DayflowApiError,
+  type DayflowAttendance,
+  type DayflowLeave,
+  type DayflowEmployeeInput,
+  type DayflowLeaveInput,
+  type DayflowProfile,
+  type DayflowProvisionedEmployee,
+} from "@/lib/dayflow-api"
 import { cn } from "@/lib/utils"
+import { dayflowApiEnabled, useDayflow } from "@/hooks/useDayflow"
 
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
@@ -52,6 +63,7 @@ type LeaveRequest = {
   days: number
   status: LeaveStatus
   tone: string
+  attachmentName?: string
 }
 
 const employees = [
@@ -70,8 +82,55 @@ const initialLeaves: LeaveRequest[] = [
 
 const attendanceBars = [68, 82, 74, 94, 78, 88, 95, 81, 92, 86, 98, 90, 84, 95, 93, 87, 96, 89, 94, 91, 97]
 
+const leaveTypeLabels = { paid: "Paid time off", sick: "Sick leave", unpaid: "Unpaid leave" } as const
+
+function mapApiLeave(leave: DayflowLeave): LeaveRequest {
+  const start = new Date(`${leave.start_date}T00:00:00`)
+  const end = new Date(`${leave.end_date}T00:00:00`)
+  const formatDate = (value: Date) => value.toLocaleDateString("en-IN", { month: "short", day: "numeric" })
+  return {
+    id: leave.id,
+    name: leave.employee_name,
+    initials: leave.employee_name.split(" ").map((part) => part[0]).join("").slice(0, 2),
+    type: leaveTypeLabels[leave.leave_type],
+    dates: leave.start_date === leave.end_date ? formatDate(start) : `${formatDate(start)} – ${formatDate(end)}`,
+    days: leave.days,
+    status: leave.status,
+    tone: leave.status === "approved" ? "bg-[#d8efbd] text-[#3c6c32]" : leave.status === "rejected" ? "bg-[#f7d8d0] text-[#9b4e40]" : "bg-[#f1d3c9] text-[#8a4738]",
+    attachmentName: leave.attachment_name ?? undefined,
+  }
+}
+
+function mapApiPeople(people: DayflowProfile[], records?: DayflowAttendance[]) {
+  const today = new Date().toISOString().slice(0, 10)
+  return people.map((person, index) => {
+    const record = records?.find((item) => item.profile_id === person.id && item.attendance_date === today)
+    const status = record?.status === "leave" ? "leave" as const : record?.check_in_at ? "present" as const : "away" as const
+    return {
+      id: person.id,
+      name: person.full_name,
+      role: person.job_position,
+      department: person.department,
+      initials: person.full_name.split(" ").map((part) => part[0]).join("").slice(0, 2),
+      status: records ? status : index === 0 ? "present" as const : "away" as const,
+      time: record?.check_in_at ? new Date(record.check_in_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : record?.status === "leave" ? "Approved leave" : "Not checked in",
+      tone: index % 2 === 0 ? "bg-[#d8efbd] text-[#3c6c32]" : "bg-[#dce4f7] text-[#4f6291]",
+    }
+  })
+}
+
+function leaveInputFromDraft(draft: LeaveDraft): DayflowLeaveInput {
+  const leaveType = draft.type === "Sick leave" ? "sick" : draft.type === "Unpaid leave" ? "unpaid" : "paid"
+  return { leave_type: leaveType, start_date: draft.startDate, end_date: draft.endDate, remarks: draft.remarks, attachment_name: draft.attachmentName, attachment_size: draft.attachmentSize }
+}
+
+function getApiError(error: unknown): string {
+  return error instanceof DayflowApiError ? error.message : "Dayflow could not complete that action. Try again."
+}
+
 function Dashboard() {
   const [role, setRole] = useState<Role>("employee")
+  const dayflow = useDayflow(role)
   const [view, setView] = useState<View>("Overview")
   const [checkedIn, setCheckedIn] = useState(false)
   const [leaves, setLeaves] = useState(initialLeaves)
@@ -89,6 +148,7 @@ function Dashboard() {
       "leave-time-off": "Leave & time off",
       people: "People",
       payroll: "Payroll",
+      profile: "Profile",
     }
     const syncView = () => {
       const next = viewByHash[window.location.hash.replace("#", "")]
@@ -99,17 +159,40 @@ function Dashboard() {
     return () => window.removeEventListener("hashchange", syncView)
   }, [])
 
-  const pendingCount = leaves.filter((leave) => leave.status === "pending").length
-  const approvedCount = leaves.filter((leave) => leave.status === "approved").length
+  const apiLeaves = useMemo(
+    () => dayflow.leaves.data?.map(mapApiLeave) ?? null,
+    [dayflow.leaves.data],
+  )
+  const sortedLeaves = useMemo(() => apiLeaves ?? leaves, [apiLeaves, leaves])
+  const pendingCount = sortedLeaves.filter((leave) => leave.status === "pending").length
+  const approvedCount = sortedLeaves.filter((leave) => leave.status === "approved").length
   const currentUser = role === "hr" ? "Ashwith Shetty" : "Arjun Singh"
+  const todayAttendance = dayflow.attendance.data?.find(
+    (item) => item.attendance_date === new Date().toISOString().slice(0, 10),
+  )
+  const effectiveCheckedIn = dayflowApiEnabled
+    ? Boolean(todayAttendance?.check_in_at && !todayAttendance.check_out_at)
+    : checkedIn
 
-  const sortedLeaves = useMemo(() => leaves, [leaves])
+  useEffect(() => {
+    if (dayflowApiEnabled && dayflow.me.data) setRole(dayflow.me.data.role === "hr" ? "hr" : "employee")
+  }, [dayflow.me.data])
 
   const sendFlow = (prompt = flowInput) => {
     const trimmed = prompt.trim()
     if (!trimmed) return
     setFlowMessages((items) => [...items, { from: "user", text: trimmed }])
     setFlowInput("")
+    if (dayflowApiEnabled) {
+      dayflow.flowMessage.mutate(trimmed, {
+        onSuccess: (response) => {
+          setFlowMessages((items) => [...items, { from: "flow", text: response.answer }])
+          if (response.action?.action === "apply_leave") setDraftLeave(true)
+        },
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
     const lower = trimmed.toLowerCase()
     window.setTimeout(() => {
       if (lower.includes("leave") || lower.includes("off") || lower.includes("sick")) {
@@ -126,6 +209,23 @@ function Dashboard() {
   }
 
   const confirmLeave = () => {
+    const input: DayflowLeaveInput = {
+      leave_type: "sick",
+      start_date: "2026-08-25",
+      end_date: "2026-08-26",
+      remarks: "Requested through Flow",
+    }
+    if (dayflowApiEnabled) {
+      dayflow.createLeave.mutate(input, {
+        onSuccess: () => {
+          setDraftLeave(false)
+          toast.success("Leave request sent to People Ops")
+          setFlowMessages((items) => [...items, { from: "flow", text: "Done — your sick leave request is now Pending. I’ll keep it visible in your activity." }])
+        },
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
     const next: LeaveRequest = { id: `leave-${Date.now()}`, name: "Arjun Singh", initials: "AS", type: "Sick leave", dates: "Aug 25 – 26", days: 2, status: "pending", tone: "bg-[#d8efbd] text-[#3c6c32]" }
     setLeaves((items) => [next, ...items])
     setDraftLeave(false)
@@ -134,14 +234,56 @@ function Dashboard() {
   }
 
   const updateLeave = (id: string, status: LeaveStatus) => {
+    if (status === "pending") return
+    if (dayflowApiEnabled) {
+      dayflow.reviewLeave.mutate({ requestId: id, status }, {
+        onSuccess: () => toast.success(status === "approved" ? "Leave approved and employee notified" : "Leave request rejected"),
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
     setLeaves((items) => items.map((leave) => (leave.id === id ? { ...leave, status } : leave)))
     toast.success(status === "approved" ? "Leave approved and employee notified" : "Leave request rejected")
   }
 
   const selectView = (next: View) => setView(next)
 
+  const changeRole = (next: Role) => {
+    setRole(next)
+    setView("Overview")
+    window.localStorage.setItem("dayflow-demo-role", next)
+    window.dispatchEvent(new CustomEvent("dayflow-role-change"))
+  }
+
+  const toggleAttendance = () => {
+    if (dayflowApiEnabled) {
+      const mutation = effectiveCheckedIn ? dayflow.checkOut : dayflow.checkIn
+      mutation.mutate(undefined, {
+        onSuccess: () => toast.success(effectiveCheckedIn ? "Checked out. Have a good evening!" : "Checked in. Your workday is live."),
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
+    setCheckedIn((value) => !value)
+    toast.success(effectiveCheckedIn ? "Checked out. Have a good evening!" : "Checked in at 09:18 AM")
+  }
+
+  const submitLeave = (draft: LeaveDraft) => {
+    if (dayflowApiEnabled) {
+      dayflow.createLeave.mutate(leaveInputFromDraft(draft), {
+        onSuccess: () => toast.success("Leave request submitted for HR review"),
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
+    setLeaves((items) => [draft, ...items])
+    toast.success("Leave request submitted for HR review")
+  }
+
   return (
     <div className="space-y-7">
+      {dayflowApiEnabled && dayflow.isLoading && <div className="rounded-xl border border-[#dfe5e0] bg-white px-4 py-3 text-xs font-semibold text-[#65737f]" role="status">Syncing the latest Dayflow workspace…</div>}
+      {dayflowApiEnabled && dayflow.isError && <div className="rounded-xl border border-[#efc8bc] bg-[#fff4ef] px-4 py-3 text-xs font-semibold text-[#9b4e40]" role="alert">The Dayflow API is unavailable. Showing the last local fixture while you reconnect.</div>}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#7b8792]"><span className="size-2 rounded-full bg-[#c7f36b]" /> People operations / {role === "hr" ? "HR command center" : "My workday"}</div>
@@ -150,26 +292,26 @@ function Dashboard() {
         </div>
         <div className="flex items-center gap-2">
           <div className="rounded-xl border border-[#dfe5e0] bg-white p-1 text-xs shadow-sm">
-            <button className={cn("rounded-lg px-3 py-2 font-semibold transition", role === "employee" ? "bg-[#0e1c2f] text-white" : "text-[#78838d]")} onClick={() => { setRole("employee"); setView("Overview") }} type="button">Employee view</button>
-            <button className={cn("rounded-lg px-3 py-2 font-semibold transition", role === "hr" ? "bg-[#0e1c2f] text-white" : "text-[#78838d]")} onClick={() => { setRole("hr"); setView("Overview") }} type="button">HR view</button>
+            <button className={cn("rounded-lg px-3 py-2 font-semibold transition", role === "employee" ? "bg-[#0e1c2f] text-white" : "text-[#78838d]")} onClick={() => changeRole("employee")} type="button">Employee view</button>
+            <button className={cn("rounded-lg px-3 py-2 font-semibold transition", role === "hr" ? "bg-[#0e1c2f] text-white" : "text-[#78838d]")} onClick={() => changeRole("hr")} type="button">HR view</button>
           </div>
           <Button className="hidden rounded-xl bg-[#c7f36b] text-[#0e1c2f] shadow-sm hover:bg-[#b5e958] sm:flex" onClick={() => setFlowOpen(true)}><Sparkles className="mr-2 size-4" /> Ask Flow</Button>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label={role === "hr" ? "People present" : "Today’s status"} value={role === "hr" ? "84%" : checkedIn ? "Checked in" : "Not checked in"} detail={role === "hr" ? "21 of 25 checked in" : checkedIn ? "Since 09:18 AM · on track" : "Start your workday in one tap"} icon={<CalendarCheck className="size-5" />} tone="lime" action={role === "employee" ? { label: checkedIn ? "Check out" : "Check in", onClick: () => { setCheckedIn((value) => !value); toast.success(checkedIn ? "Checked out. Have a good evening!" : "Checked in at 09:18 AM") } } : undefined} />
+        <MetricCard label={role === "hr" ? "People present" : "Today’s status"} value={role === "hr" ? "84%" : effectiveCheckedIn ? "Checked in" : "Not checked in"} detail={role === "hr" ? "21 of 25 checked in" : effectiveCheckedIn ? "Since 09:18 AM · on track" : "Start your workday in one tap"} icon={<CalendarCheck className="size-5" />} tone="lime" action={role === "employee" ? { label: effectiveCheckedIn ? "Check out" : "Check in", onClick: toggleAttendance } : undefined} />
         <MetricCard label={role === "hr" ? "Pending approvals" : "Leave balance"} value={role === "hr" ? String(pendingCount).padStart(2, "0") : "14 days"} detail={role === "hr" ? "Need your attention today" : "4 days used this year"} icon={<Clock3 className="size-5" />} tone="peach" action={role === "employee" ? { label: "Request time off", onClick: () => setView("Leave & time off") } : { label: "Review now", onClick: () => setView("Leave & time off") }} />
         <MetricCard label="Attendance streak" value="23 days" detail="You’re in a good rhythm" icon={<Flame className="size-5" />} tone="blue" action={{ label: "Keep it going", onClick: () => toast("Small habits build great teams") }} />
         <MetricCard label={role === "hr" ? "Team pulse" : "Next payday"} value={role === "hr" ? "Positive" : "31 Aug"} detail={role === "hr" ? "+12% energy this week" : "8 days from now"} icon={<TrendingUp className="size-5" />} tone="lavender" action={role === "hr" ? { label: "View insights", onClick: () => setView("Attendance") } : { label: "View salary", onClick: () => setView("Payroll") }} />
       </div>
 
-      {view === "Overview" && <Overview role={role} checkedIn={checkedIn} leaves={sortedLeaves} approvedCount={approvedCount} setView={selectView} updateLeave={updateLeave} />}
-      {view === "Attendance" && <AttendanceView role={role} checkedIn={checkedIn} />}
-      {view === "Leave & time off" && <LeaveView role={role} leaves={sortedLeaves} updateLeave={updateLeave} onDraft={() => { setFlowOpen(true); setDraftLeave(true) }} onSubmitLeave={(leave) => setLeaves((items) => [leave, ...items])} />}
-      {view === "People" && <PeopleView />}
+      {view === "Overview" && <Overview role={role} checkedIn={effectiveCheckedIn} leaves={sortedLeaves} approvedCount={approvedCount} setView={selectView} updateLeave={updateLeave} />}
+      {view === "Attendance" && <AttendanceView role={role} checkedIn={effectiveCheckedIn} records={dayflow.attendance.data} />}
+      {view === "Leave & time off" && <LeaveView role={role} leaves={sortedLeaves} updateLeave={updateLeave} onDraft={() => { setFlowOpen(true); setDraftLeave(true) }} onSubmitLeave={submitLeave} />}
+      {view === "People" && <PeopleView role={role} serverPeople={dayflow.people.data} attendance={dayflow.attendance.data} onCreatePerson={(input) => dayflow.createPerson.mutateAsync(input)} isCreating={dayflow.createPerson.isPending} />}
       {view === "Payroll" && <PayrollView role={role} />}
-      {view === "Profile" && <ProfileView role={role} />}
+      {view === "Profile" && <ProfileView role={role} profile={dayflow.me.data} />}
 
       <div className="grid gap-4 xl:grid-cols-[1fr_365px]">
         <div className="rounded-2xl bg-[#0e1c2f] p-5 text-white shadow-[0_22px_50px_-30px_rgba(14,28,47,0.75)] sm:p-7">
@@ -201,16 +343,17 @@ function PulseRow({ employee }: { employee: typeof employees[number] }) { return
 function StatusDot({ status }: { status: string }) { const color = status === "present" ? "bg-[#67c479]" : status === "late" ? "bg-[#e9b848]" : status === "leave" ? "bg-[#7c9ce2]" : "bg-[#c7cbc7]"; return <span className={cn("size-2.5 rounded-full", color)} /> }
 function LeaveMini({ leave, role, updateLeave }: { leave: LeaveRequest; role: Role; updateLeave: (id: string, status: LeaveStatus) => void }) { return <div className="flex items-center gap-3 rounded-xl border border-[#edf0ec] p-3"><div className={cn("grid size-9 place-items-center rounded-lg text-[11px] font-bold", leave.tone)}>{leave.initials}</div><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{leave.name}</div><div className="text-xs text-[#8b959e]">{leave.type} · {leave.dates}</div></div><div className="flex items-center gap-1">{role === "hr" && leave.status === "pending" ? <><button className="grid size-7 place-items-center rounded-lg bg-[#e7f5db] text-[#4f843e]" onClick={() => updateLeave(leave.id, "approved")} type="button"><Check className="size-3.5" /></button><button className="grid size-7 place-items-center rounded-lg bg-[#fae9e2] text-[#a25242]" onClick={() => updateLeave(leave.id, "rejected")} type="button"><X className="size-3.5" /></button></> : <Badge className={cn("border-0 text-[10px] capitalize", leave.status === "approved" ? "bg-[#e8f5dc] text-[#4d793b]" : leave.status === "rejected" ? "bg-[#fae9e2] text-[#a25242]" : "bg-[#f9edcf] text-[#8f6b1d]")}>{leave.status}</Badge>}</div></div> }
 
-function AttendanceView({ role, checkedIn }: { role: Role; checkedIn: boolean }) { return <Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="flex flex-col justify-between gap-3 space-y-0 p-6 sm:flex-row sm:items-center"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">{role === "hr" ? "Team attendance" : "My attendance"}</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">August 2026 rhythm</CardTitle></div><div className="flex items-center gap-2"><Badge className="border-0 bg-[#eff8df] text-[#4f762e]">{role === "hr" ? "25 people" : checkedIn ? "Checked in" : "Not checked in"}</Badge><Button variant="outline" className="rounded-xl border-[#dfe5e0]">This month <ChevronRight className="ml-2 size-4" /></Button></div></CardHeader><CardContent className="p-6 pt-0"><div className="grid gap-4 md:grid-cols-3"><div className="rounded-xl bg-[#f6f8f5] p-4"><div className="text-xs text-[#7b8792]">Attendance rate</div><div className="mt-1 font-display text-3xl font-semibold">94.2%</div><div className="mt-2 text-xs font-semibold text-[#4e7a3c]">+4.8% vs last month</div></div><div className="rounded-xl bg-[#f6f8f5] p-4"><div className="text-xs text-[#7b8792]">Avg. workday</div><div className="mt-1 font-display text-3xl font-semibold">8h 12m</div><div className="mt-2 text-xs text-[#8b959e]">Target: 8h 00m</div></div><div className="rounded-xl bg-[#f6f8f5] p-4"><div className="text-xs text-[#7b8792]">On leave today</div><div className="mt-1 font-display text-3xl font-semibold">03</div><div className="mt-2 text-xs text-[#8b959e]">Across 2 departments</div></div></div><div className="mt-8"><div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">Daily presence signal</div><div className="flex items-center gap-3 text-[10px] text-[#84909a]"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#c7f36b]" /> Present</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#efbb54]" /> Late</span></div></div><div className="flex h-48 items-end gap-1.5 rounded-2xl bg-[#f8faf7] p-4">{attendanceBars.map((bar, index) => <div className="group relative flex-1" key={`${bar}-${index}`}><div className={cn("w-full rounded-t-md transition hover:opacity-75", bar > 90 ? "bg-[#c7f36b]" : bar > 80 ? "bg-[#dbeab9]" : "bg-[#efbb54]")} style={{ height: `${bar}%` }} /><div className="absolute -top-6 left-1/2 hidden -translate-x-1/2 rounded bg-[#0e1c2f] px-1.5 py-1 text-[9px] text-white group-hover:block">{bar}%</div></div>)}</div><div className="mt-2 flex justify-between px-1 text-[10px] text-[#a0a9b0]"><span>Aug 01</span><span>Aug 08</span><span>Aug 15</span><span>Aug 22</span></div></div></CardContent></Card> }
+function AttendanceView({ role, checkedIn, records }: { role: Role; checkedIn: boolean; records?: DayflowAttendance[] }) { return <Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="flex flex-col justify-between gap-3 space-y-0 p-6 sm:flex-row sm:items-center"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">{role === "hr" ? "Team attendance" : "My attendance"}</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">August 2026 rhythm</CardTitle></div><div className="flex items-center gap-2"><Badge className="border-0 bg-[#eff8df] text-[#4f762e]">{role === "hr" ? `${records?.length ?? 0} records` : checkedIn ? "Checked in" : "Not checked in"}</Badge><Button variant="outline" className="rounded-xl border-[#dfe5e0]">This month <ChevronRight className="ml-2 size-4" /></Button></div></CardHeader><CardContent className="p-6 pt-0"><div className="grid gap-4 md:grid-cols-3"><div className="rounded-xl bg-[#f6f8f5] p-4"><div className="text-xs text-[#7b8792]">Attendance rate</div><div className="mt-1 font-display text-3xl font-semibold">94.2%</div><div className="mt-2 text-xs font-semibold text-[#4e7a3c]">+4.8% vs last month</div></div><div className="rounded-xl bg-[#f6f8f5] p-4"><div className="text-xs text-[#7b8792]">Avg. workday</div><div className="mt-1 font-display text-3xl font-semibold">8h 12m</div><div className="mt-2 text-xs text-[#8b959e]">Target: 8h 00m</div></div><div className="rounded-xl bg-[#f6f8f5] p-4"><div className="text-xs text-[#7b8792]">On leave today</div><div className="mt-1 font-display text-3xl font-semibold">03</div><div className="mt-2 text-xs text-[#8b959e]">Across 2 departments</div></div></div><div className="mt-8"><div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">Daily presence signal</div><div className="flex items-center gap-3 text-[10px] text-[#84909a]"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#c7f36b]" /> Present</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#efbb54]" /> Late</span></div></div><div className="flex h-48 items-end gap-1.5 rounded-2xl bg-[#f8faf7] p-4">{attendanceBars.map((bar, index) => <div className="group relative flex-1" key={`${bar}-${index}`}><div className={cn("w-full rounded-t-md transition hover:opacity-75", bar > 90 ? "bg-[#c7f36b]" : bar > 80 ? "bg-[#dbeab9]" : "bg-[#efbb54]")} style={{ height: `${bar}%` }} /><div className="absolute -top-6 left-1/2 hidden -translate-x-1/2 rounded bg-[#0e1c2f] px-1.5 py-1 text-[9px] text-white group-hover:block">{bar}%</div></div>)}</div><div className="mt-2 flex justify-between px-1 text-[10px] text-[#a0a9b0]"><span>Aug 01</span><span>Aug 08</span><span>Aug 15</span><span>Aug 22</span></div></div>{records && records.length > 0 && <div className="mt-6 overflow-x-auto rounded-2xl border border-[#edf0ec]"><table className="w-full text-left text-xs"><thead className="bg-[#fafbf9] text-[#7d8891]"><tr><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Check in</th><th className="px-4 py-3 font-semibold">Check out</th><th className="px-4 py-3 font-semibold">Work hours</th></tr></thead><tbody>{records.map((record) => <tr className="border-t border-[#edf0ec]" key={record.id}><td className="px-4 py-3">{record.attendance_date}</td><td className="px-4 py-3 capitalize">{record.status.replace("_", " ")}</td><td className="px-4 py-3">{record.check_in_at ? new Date(record.check_in_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td><td className="px-4 py-3">{record.check_out_at ? new Date(record.check_out_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td><td className="px-4 py-3">{Math.floor(record.worked_minutes / 60)}h {record.worked_minutes % 60}m</td></tr>)}</tbody></table></div>}</CardContent></Card> }
 
-function LeaveView({ role, leaves, updateLeave, onDraft, onSubmitLeave }: { role: Role; leaves: LeaveRequest[]; updateLeave: (id: string, status: LeaveStatus) => void; onDraft: () => void; onSubmitLeave: (leave: LeaveRequest) => void }) { const columns: LeaveStatus[] = ["pending", "approved", "rejected"]; return <div className="space-y-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Time off workspace</div><h2 className="mt-2 font-display text-3xl font-semibold tracking-[-0.05em]">Leave requests</h2></div>{role === "employee" && <Button className="rounded-xl bg-[#0e1c2f]" onClick={onDraft}><Sparkles className="mr-2 size-4 text-[#c7f36b]" /> Draft with Flow</Button>}</div>{role === "employee" && <LeaveRequestForm onSubmit={onSubmitLeave} />}<div className="grid gap-4 lg:grid-cols-3">{columns.map((status) => <div className="rounded-2xl bg-[#edf1ec] p-3" key={status}><div className="mb-3 flex items-center justify-between px-2 pt-1"><div className="text-xs font-bold uppercase tracking-[0.16em] text-[#6c7881]">{status}</div><Badge className="border-0 bg-white text-[#7c8790]">{leaves.filter((leave) => leave.status === status).length}</Badge></div><div className="space-y-3">{leaves.filter((leave) => leave.status === status).map((leave) => <LeaveCard key={leave.id} leave={leave} role={role} updateLeave={updateLeave} />)}</div>{status === "pending" && leaves.filter((leave) => leave.status === status).length === 0 && <div className="rounded-xl border border-dashed border-[#cfd8cf] p-7 text-center text-xs text-[#8c9791]">No requests waiting</div>}</div>)}</div></div> }
-function LeaveCard({ leave, role, updateLeave }: { leave: LeaveRequest; role: Role; updateLeave: (id: string, status: LeaveStatus) => void }) { return <div className="rounded-xl border border-[#e3e9e2] bg-white p-4 shadow-sm"><div className="flex items-start justify-between"><div className={cn("grid size-9 place-items-center rounded-lg text-[11px] font-bold", leave.tone)}>{leave.initials}</div><button className="text-[#b0b8bd]" type="button"><MoreHorizontal className="size-4" /></button></div><div className="mt-3 text-sm font-bold">{leave.name}</div><div className="mt-1 text-xs text-[#7f8b93]">{leave.type} · {leave.dates}</div><div className="mt-3 flex items-center justify-between text-[11px] text-[#919aa1]"><span>{leave.days} {leave.days === 1 ? "day" : "days"}</span>{leave.status === "pending" && role === "hr" ? <div className="flex gap-1"><button className="rounded-lg bg-[#dff3cc] px-2 py-1 font-bold text-[#4f7b3b]" onClick={() => updateLeave(leave.id, "approved")} type="button">Approve</button><button className="rounded-lg bg-[#fae8e0] px-2 py-1 font-bold text-[#9b4e40]" onClick={() => updateLeave(leave.id, "rejected")} type="button">Reject</button></div> : <span className="capitalize">{leave.status}</span>}</div></div> } 
+function LeaveView({ role, leaves, updateLeave, onDraft, onSubmitLeave }: { role: Role; leaves: LeaveRequest[]; updateLeave: (id: string, status: LeaveStatus) => void; onDraft: () => void; onSubmitLeave: (leave: LeaveDraft) => void }) { const columns: LeaveStatus[] = ["pending", "approved", "rejected"]; const usedPaidDays = leaves.filter((leave) => leave.name === "Arjun Singh" && leave.type === "Paid time off" && leave.status === "approved").reduce((total, leave) => total + leave.days, 0); return <div className="space-y-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Time off workspace</div><h2 className="mt-2 font-display text-3xl font-semibold tracking-[-0.05em]">Leave requests</h2></div>{role === "employee" && <Button className="rounded-xl bg-[#0e1c2f]" onClick={onDraft}><Sparkles className="mr-2 size-4 text-[#c7f36b]" /> Draft with Flow</Button>}</div>{role === "employee" && <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-[#eff8df] p-4"><div className="text-xs text-[#66814e]">Paid time off</div><div className="mt-1 font-display text-2xl font-semibold">{Math.max(0, 14 - usedPaidDays)} days</div><div className="mt-1 text-[11px] text-[#7e9270]">{usedPaidDays} used this year</div></div><div className="rounded-xl bg-[#fae9e2] p-4"><div className="text-xs text-[#9b6656]">Sick leave</div><div className="mt-1 font-display text-2xl font-semibold">10 days</div><div className="mt-1 text-[11px] text-[#a17d72]">Allocation remaining</div></div><div className="rounded-xl bg-[#e7eefb] p-4"><div className="text-xs text-[#5a6e9c]">Unpaid leave</div><div className="mt-1 font-display text-2xl font-semibold">As needed</div><div className="mt-1 text-[11px] text-[#7787a9]">Requires HR review</div></div></div>} {role === "employee" && <LeaveRequestForm onSubmit={onSubmitLeave} />}<div className="grid gap-4 lg:grid-cols-3">{columns.map((status) => <div className="rounded-2xl bg-[#edf1ec] p-3" key={status}><div className="mb-3 flex items-center justify-between px-2 pt-1"><div className="text-xs font-bold uppercase tracking-[0.16em] text-[#6c7881]">{status}</div><Badge className="border-0 bg-white text-[#7c8790]">{leaves.filter((leave) => leave.status === status).length}</Badge></div><div className="space-y-3">{leaves.filter((leave) => leave.status === status).map((leave) => <LeaveCard key={leave.id} leave={leave} role={role} updateLeave={updateLeave} />)}</div>{status === "pending" && leaves.filter((leave) => leave.status === status).length === 0 && <div className="rounded-xl border border-dashed border-[#cfd8cf] p-7 text-center text-xs text-[#8c9791]">No requests waiting</div>}</div>)}</div></div> }
+function LeaveCard({ leave, role, updateLeave }: { leave: LeaveRequest; role: Role; updateLeave: (id: string, status: LeaveStatus) => void }) { return <div className="rounded-xl border border-[#e3e9e2] bg-white p-4 shadow-sm"><div className="flex items-start justify-between"><div className={cn("grid size-9 place-items-center rounded-lg text-[11px] font-bold", leave.tone)}>{leave.initials}</div><div className="flex items-center gap-2"><button className="text-[#b0b8bd]" type="button"><MoreHorizontal className="size-4" /></button>{leave.attachmentName && <Paperclip aria-label="Certificate metadata attached" className="size-3.5 text-[#78935f]" />}</div></div><div className="mt-3 text-sm font-bold">{leave.name}</div><div className="mt-1 text-xs text-[#7f8b93]">{leave.type} · {leave.dates}</div><div className="mt-3 flex items-center justify-between text-[11px] text-[#919aa1]"><span>{leave.days} {leave.days === 1 ? "day" : "days"}</span>{leave.status === "pending" && role === "hr" ? <div className="flex gap-1"><button className="rounded-lg bg-[#dff3cc] px-2 py-1 font-bold text-[#4f7b3b]" onClick={() => updateLeave(leave.id, "approved")} type="button">Approve</button><button className="rounded-lg bg-[#fae8e0] px-2 py-1 font-bold text-[#9b4e40]" onClick={() => updateLeave(leave.id, "rejected")} type="button">Reject</button></div> : <span className="capitalize">{leave.status}</span>}</div></div> }
 
-function PeopleView() { const [query, setQuery] = useState(""); const filtered = employees.filter((employee) => `${employee.name} ${employee.department}`.toLowerCase().includes(query.toLowerCase())); if (filtered.length === 0) return <AsyncState state="empty" />; return <Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="flex flex-col justify-between gap-4 space-y-0 p-6 sm:flex-row sm:items-center"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Directory</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">Your people</CardTitle></div><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#a2acb2]" /><Input className="w-full rounded-xl border-[#dfe5e0] pl-9 sm:w-64" onChange={(event) => setQuery(event.target.value)} placeholder="Search people" value={query} /></div></CardHeader><CardContent className="p-0"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-y border-[#edf0ec] bg-[#fafbf9] text-xs text-[#7d8891]"><tr><th className="px-6 py-3 font-semibold">Person</th><th className="px-6 py-3 font-semibold">Department</th><th className="px-6 py-3 font-semibold">Today</th><th className="px-6 py-3 font-semibold">Workday</th><th className="px-6 py-3" /></tr></thead><tbody>{filtered.map((employee) => <tr className="border-b border-[#f0f2ef] last:border-0" key={employee.name}><td className="px-6 py-4"><div className="flex items-center gap-3"><div className={cn("grid size-9 place-items-center rounded-lg text-[11px] font-bold", employee.tone)}>{employee.initials}</div><div><div className="font-semibold">{employee.name}</div><div className="text-xs text-[#89949d]">{employee.role}</div></div></div></td><td className="px-6 py-4 text-[#6c7882]">{employee.department}</td><td className="px-6 py-4"><div className="flex items-center gap-2"><StatusDot status={employee.status} /><span className="capitalize text-[#6c7882]">{employee.status}</span></div></td><td className="px-6 py-4 text-[#6c7882]">{employee.time}</td><td className="px-6 py-4 text-right"><button className="text-[#98a2aa]" type="button"><MoreHorizontal className="size-4" /></button></td></tr>)}</tbody></table></div></CardContent></Card> }
+function PeopleView({ role, serverPeople, attendance, onCreatePerson, isCreating }: { role: Role; serverPeople?: DayflowProfile[]; attendance?: DayflowAttendance[]; onCreatePerson: (input: DayflowEmployeeInput) => Promise<DayflowProvisionedEmployee>; isCreating: boolean }) { const [query, setQuery] = useState(""); const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null); const source = serverPeople ? mapApiPeople(serverPeople, attendance) : employees; const selectedProfile = serverPeople?.find((person) => person.id === selectedProfileId); const filtered = source.filter((employee) => `${employee.name} ${employee.department}`.toLowerCase().includes(query.toLowerCase())); if (filtered.length === 0) return <AsyncState state="empty" />; return <Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="flex flex-col justify-between gap-4 space-y-0 p-6 sm:flex-row sm:items-center"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Directory</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">Your people</CardTitle></div><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#a2acb2]" /><Input className="w-full rounded-xl border-[#dfe5e0] pl-9 sm:w-64" onChange={(event) => setQuery(event.target.value)} placeholder="Search people" value={query} /></div></CardHeader><CardContent className="p-0">{role === "hr" && <div className="border-b border-[#edf0ec] p-6"><EmployeeProvisioningForm isSubmitting={isCreating} onSubmit={onCreatePerson} /></div>}<div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-y border-[#edf0ec] bg-[#fafbf9] text-xs text-[#7d8891]"><tr><th className="px-6 py-3 font-semibold">Person</th><th className="px-6 py-3 font-semibold">Department</th><th className="px-6 py-3 font-semibold">Today</th><th className="px-6 py-3 font-semibold">Workday</th><th className="px-6 py-3" /></tr></thead><tbody>{filtered.map((employee) => <tr className="cursor-pointer border-b border-[#f0f2ef] last:border-0 hover:bg-[#fafcf8]" key={employee.name} onClick={() => { if ("id" in employee && typeof employee.id === "string") setSelectedProfileId(employee.id) }} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" && "id" in employee && typeof employee.id === "string") setSelectedProfileId(employee.id) }}>
+<td className="px-6 py-4"><div className="flex items-center gap-3"><div className={cn("grid size-9 place-items-center rounded-lg text-[11px] font-bold", employee.tone)}>{employee.initials}</div><div><div className="font-semibold">{employee.name}</div><div className="text-xs text-[#89949d]">{employee.role}</div></div></div></td><td className="px-6 py-4 text-[#6c7882]">{employee.department}</td><td className="px-6 py-4"><div className="flex items-center gap-2"><StatusDot status={employee.status} /><span className="capitalize text-[#6c7882]">{employee.status}</span></div></td><td className="px-6 py-4 text-[#6c7882]">{employee.time}</td><td className="px-6 py-4 text-right"><button className="text-[#98a2aa]" type="button"><MoreHorizontal className="size-4" /></button></td></tr>)}</tbody></table></div>{selectedProfile && <div className="border-t border-[#edf0ec] p-6"><div className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Read-only employee profile</div><ProfileView role={role} profile={selectedProfile} /></div>}</CardContent></Card> }
 
-function PayrollView({ role }: { role: Role }) { const [selected, setSelected] = useState("Arjun Singh"); const generate = async () => { try { const { jsPDF } = await import("jspdf"); const doc = new jsPDF(); doc.setFillColor(14, 28, 47); doc.rect(0, 0, 210, 42, "F"); doc.setTextColor(199, 243, 107); doc.setFontSize(23); doc.text("dayflow", 16, 22); doc.setTextColor(255, 255, 255); doc.setFontSize(10); doc.text("PAYSLIP · AUGUST 2026", 16, 32); doc.setTextColor(17, 28, 46); doc.setFontSize(18); doc.text(selected, 16, 65); doc.setFontSize(10); doc.text("Software Engineer · EMP-042", 16, 74); doc.setDrawColor(220, 226, 221); doc.line(16, 84, 194, 84); doc.setFontSize(11); doc.text("Basic salary", 16, 101); doc.text("₹45,000", 150, 101); doc.text("HRA allowance", 16, 116); doc.text("₹10,000", 150, 116); doc.text("Deductions", 16, 131); doc.text("-₹3,200", 150, 131); doc.setDrawColor(14, 28, 47); doc.line(16, 142, 194, 142); doc.setFontSize(14); doc.text("NET SALARY", 16, 158); doc.text("₹51,800", 148, 158); doc.setFontSize(9); doc.setTextColor(110, 122, 134); doc.text("Generated by Dayflow · Every workday, perfectly aligned.", 16, 185); doc.save(`dayflow-payslip-${selected.toLowerCase().replace(/\s+/g, "-")}.pdf`); toast.success("Payslip PDF downloaded") } catch { toast("Payslip preview ready — use your browser’s Print → Save as PDF") } }; return <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]"><Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="p-6"><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Payroll center</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">Salary snapshots</CardTitle></CardHeader><CardContent className="space-y-2 p-6 pt-0">{employees.map((employee) => <button className={cn("flex w-full items-center gap-3 rounded-xl p-3 text-left transition", selected === employee.name ? "bg-[#eff8df]" : "hover:bg-[#f6f8f5]")} key={employee.name} onClick={() => setSelected(employee.name)} type="button"><div className={cn("grid size-9 place-items-center rounded-lg text-[11px] font-bold", employee.tone)}>{employee.initials}</div><div className="flex-1"><div className="text-sm font-semibold">{employee.name}</div><div className="text-xs text-[#89949d]">{employee.role}</div></div><ChevronRight className="size-4 text-[#a0a9b0]" /></button>)}</CardContent></Card><Card className="overflow-hidden rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="flex flex-row items-start justify-between space-y-0 bg-[#0e1c2f] p-6 text-white"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#c7f36b]">August 2026 · {role === "hr" ? "Admin preview" : "Read only"}</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">{selected}</CardTitle><div className="mt-1 text-xs text-white/50">Software Engineer · EMP-042</div></div><Button className="rounded-xl bg-[#c7f36b] text-[#0e1c2f] hover:bg-[#b5e958]" onClick={generate}><Download className="mr-2 size-4" /> Generate PDF</Button></CardHeader><CardContent className="p-6"><div className="grid gap-3 sm:grid-cols-2"><SalaryLine label="Basic salary" value="₹45,000" /><SalaryLine label="HRA allowance" value="₹10,000" /><SalaryLine label="Standard allowance" value="₹4,167" /><SalaryLine label="Performance bonus" value="₹3,750" /><SalaryLine label="Provident Fund" value="−₹2,700" muted /><SalaryLine label="Professional tax" value="−₹500" muted /></div><Separator className="my-6 bg-[#edf0ec]" /><div className="flex items-end justify-between"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Net salary</div><div className="mt-1 font-display text-4xl font-semibold tracking-[-0.06em]">₹51,800</div><div className="mt-2 text-xs text-[#8a949d]">Payable days: 22 / 22</div></div><div className="rounded-xl bg-[#eff8df] p-3 text-right"><div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#63834c]">Payroll health</div><div className="mt-1 flex items-center gap-1 text-sm font-bold text-[#4f762e]"><CheckCircle2 className="size-4" /> Accurate</div></div></div></CardContent></Card></div> }
+function PayrollView({ role }: { role: Role }) { const [selected, setSelected] = useState("Arjun Singh"); const payrollQuery = useDayflow(role); const snapshot = payrollQuery.payroll.data?.find((item) => item.employee_name === selected); const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value); const generate = async () => { try { const { jsPDF } = await import("jspdf"); const doc = new jsPDF(); doc.setFillColor(14, 28, 47); doc.rect(0, 0, 210, 42, "F"); doc.setTextColor(199, 243, 107); doc.setFontSize(23); doc.text("dayflow", 16, 22); doc.setTextColor(255, 255, 255); doc.setFontSize(10); doc.text("PAYSLIP · AUGUST 2026", 16, 32); doc.setTextColor(17, 28, 46); doc.setFontSize(18); doc.text(selected, 16, 65); doc.setFontSize(10); doc.text(`${selected} · ${snapshot?.employee_code ?? "EMP-042"}`, 16, 74); doc.setDrawColor(220, 226, 221); doc.line(16, 84, 194, 84); doc.setFontSize(11); doc.text("Basic salary", 16, 101); doc.text(money(snapshot?.basic_salary ?? 45000), 150, 101); doc.text("HRA allowance", 16, 116); doc.text(money(snapshot?.hra_allowance ?? 10000), 150, 116); doc.text("Deductions", 16, 131); doc.text(`-${money(snapshot?.deductions ?? 3200)}`, 150, 131); doc.setDrawColor(14, 28, 47); doc.line(16, 142, 194, 142); doc.setFontSize(14); doc.text("NET SALARY", 16, 158); doc.text(money(snapshot?.net_salary ?? 51800), 148, 158); doc.setFontSize(9); doc.setTextColor(110, 122, 134); doc.text("Generated by Dayflow · Every workday, perfectly aligned.", 16, 185); doc.save(`dayflow-payslip-${selected.toLowerCase().replace(/\s+/g, "-")}.pdf`); toast.success("Payslip PDF downloaded") } catch { toast("Payslip preview ready — use your browser’s Print → Save as PDF") } }; return <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]"><Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="p-6"><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Payroll center</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">Salary snapshots</CardTitle></CardHeader><CardContent className="space-y-2 p-6 pt-0">{employees.map((employee) => <button className={cn("flex w-full items-center gap-3 rounded-xl p-3 text-left transition", selected === employee.name ? "bg-[#eff8df]" : "hover:bg-[#f6f8f5]")} key={employee.name} onClick={() => setSelected(employee.name)} type="button"><div className={cn("grid size-9 place-items-center rounded-lg text-[11px] font-bold", employee.tone)}>{employee.initials}</div><div className="flex-1"><div className="text-sm font-semibold">{employee.name}</div><div className="text-xs text-[#89949d]">{employee.role}</div></div><ChevronRight className="size-4 text-[#a0a9b0]" /></button>)}</CardContent></Card><Card className="overflow-hidden rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="flex flex-row items-start justify-between space-y-0 bg-[#0e1c2f] p-6 text-white"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#c7f36b]">August 2026 · {role === "hr" ? "Admin preview" : "Read only"}</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">{selected}</CardTitle><div className="mt-1 text-xs text-white/50">{snapshot?.employee_code ?? "EMP-042"} · Server snapshot</div></div><Button className="rounded-xl bg-[#c7f36b] text-[#0e1c2f] hover:bg-[#b5e958]" onClick={generate}><Download className="mr-2 size-4" /> Generate PDF</Button></CardHeader><CardContent className="p-6"><div className="grid gap-3 sm:grid-cols-2"><SalaryLine label="Basic salary" value={money(snapshot?.basic_salary ?? 45000)} /><SalaryLine label="HRA allowance" value={money(snapshot?.hra_allowance ?? 10000)} /><SalaryLine label="Standard allowance" value={money(snapshot?.standard_allowance ?? 4167)} /><SalaryLine label="Performance bonus" value={money(snapshot?.performance_bonus ?? 3750)} /><SalaryLine label="Leave travel allowance" value={money(snapshot?.leave_travel_allowance ?? 0)} /><SalaryLine label="Fixed allowance" value={money(snapshot?.fixed_allowance ?? 0)} /><SalaryLine label="Provident Fund" value={`−${money(snapshot?.pf_contribution ?? snapshot?.deductions ?? 3200)}`} muted /><SalaryLine label="Professional tax" value={`−${money(snapshot?.professional_tax ?? 200)}`} muted /></div><Separator className="my-6 bg-[#edf0ec]" /><div className="flex items-end justify-between"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Net salary</div><div className="mt-1 font-display text-4xl font-semibold tracking-[-0.06em]">{money(snapshot?.net_salary ?? 51800)}</div><div className="mt-2 text-xs text-[#8a949d]">Payable days: {snapshot?.payable_days ?? 22} / {snapshot?.attendance_days ?? 22}</div></div><div className="rounded-xl bg-[#eff8df] p-3 text-right"><div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#63834c]">Payroll health</div><div className="mt-1 flex items-center gap-1 text-sm font-bold text-[#4f762e]"><CheckCircle2 className="size-4" /> Accurate</div></div></div></CardContent></Card></div> }
 function SalaryLine({ label, value, muted = false }: { label: string; value: string; muted?: boolean }) { return <div className="flex items-center justify-between rounded-xl bg-[#f8faf7] px-4 py-3"><span className="text-sm text-[#6f7b84]">{label}</span><span className={cn("text-sm font-bold", muted ? "text-[#9a6d63]" : "text-[#1c2c42]" )}>{value}</span></div> }
-function ProfileView({ role }: { role: Role }) { return <div className="grid gap-5 lg:grid-cols-[0.75fr_1.25fr]"><Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardContent className="p-6"><div className="grid size-20 place-items-center rounded-2xl bg-[#f1c7b1] font-display text-2xl font-semibold text-[#763a2e]">AS</div><h2 className="mt-5 font-display text-2xl font-semibold">Arjun Singh</h2><p className="mt-1 text-sm text-[#7c8790]">Software Engineer · Engineering</p><div className="mt-6 flex items-center gap-2 rounded-xl bg-[#eff8df] p-3 text-xs font-semibold text-[#4e793b]"><Flame className="size-4" /> 23-day attendance streak</div><div className="mt-5 space-y-3 text-sm"><div className="flex justify-between"><span className="text-[#8a949d]">Employee ID</span><span className="font-semibold">EMP-042</span></div><div className="flex justify-between"><span className="text-[#8a949d]">Joined</span><span className="font-semibold">14 Feb 2023</span></div><div className="flex justify-between"><span className="text-[#8a949d]">Location</span><span className="font-semibold">Bengaluru</span></div></div></CardContent></Card><Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="p-6"><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Profile details</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">A little more about Arjun</CardTitle></CardHeader><CardContent className="grid gap-4 p-6 pt-0 sm:grid-cols-2"><ProfileField label="Work email" value="arjun@dayflow.demo" /><ProfileField label="Phone" value="+91 98765 43210" /><ProfileField label="Manager" value="Ashwith Shetty" /><ProfileField label="Department" value="Engineering" /><ProfileField label="About" value="Building tools that make work feel more human." /><ProfileField label="Salary info" value={role === "hr" ? "Visible to HR only" : "Private · open Payroll"} /></CardContent></Card></div> }
+function ProfileView({ role, profile }: { role: Role; profile?: DayflowProfile }) { return <div className="grid gap-5 lg:grid-cols-[0.75fr_1.25fr]"><Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardContent className="p-6"><div className="grid size-20 place-items-center rounded-2xl bg-[#f1c7b1] font-display text-2xl font-semibold text-[#763a2e]">AS</div><h2 className="mt-5 font-display text-2xl font-semibold">{profile?.full_name ?? "Arjun Singh"}</h2><p className="mt-1 text-sm text-[#7c8790]">{profile?.job_position ?? "Software Engineer"} · {profile?.department ?? "Engineering"}</p><div className="mt-6 flex items-center gap-2 rounded-xl bg-[#eff8df] p-3 text-xs font-semibold text-[#4e793b]"><Flame className="size-4" /> 23-day attendance streak</div><div className="mt-5 space-y-3 text-sm"><div className="flex justify-between"><span className="text-[#8a949d]">Employee ID</span><span className="font-semibold">{profile?.employee_code ?? "EMP-042"}</span></div><div className="flex justify-between"><span className="text-[#8a949d]">Joined</span><span className="font-semibold">{profile?.joining_year ? `Joined ${profile.joining_year}` : "14 Feb 2023"}</span></div><div className="flex justify-between"><span className="text-[#8a949d]">Location</span><span className="font-semibold">{profile?.location ?? "Bengaluru"}</span></div></div></CardContent></Card><Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="p-6"><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Profile details</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">A little more about {profile?.full_name ?? "Arjun"}</CardTitle></CardHeader><CardContent className="grid gap-4 p-6 pt-0 sm:grid-cols-2"><ProfileField label="Work email" value={profile?.email ?? "arjun@dayflow.demo"} /><ProfileField label="Phone" value={profile?.phone || "+91 98765 43210"} /><ProfileField label="Manager" value={profile?.manager || "Ashwith Shetty"} /><ProfileField label="Department" value={profile?.department ?? "Engineering"} /><ProfileField label="About" value="Building tools that make work feel more human." /><ProfileField label="Salary info" value={role === "hr" ? "Visible to HR only" : "Private · open Payroll"} /></CardContent></Card></div> }
 function ProfileField({ label, value }: { label: string; value: string }) { return <div className="rounded-xl bg-[#f8faf7] p-4"><div className="text-xs text-[#89949d]">{label}</div><div className="mt-1 text-sm font-semibold text-[#233149]">{value}</div></div> }
 function SparkItem({ icon, text }: { icon: string; text: string }) { return <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3"><div className="text-xs font-bold text-[#c7f36b]">{icon}</div><div className="text-xs text-white/65">{text}</div></div> }
 function ActivityLine({ color, title, detail }: { color: string; title: string; detail: string }) { return <div className="flex gap-3 py-2"><span className={cn("mt-1.5 size-2 shrink-0 rounded-full", color)} /><div><div className="text-sm font-semibold">{title}</div><div className="mt-0.5 text-xs text-[#8a949d]">{detail}</div></div></div> }
