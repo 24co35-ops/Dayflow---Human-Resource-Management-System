@@ -28,6 +28,7 @@ export function useDayflow(role: DayflowRole, enabled = dayflowApiEnabled) {
       queryClient.invalidateQueries({ queryKey: ["dayflow", "me", actor] }),
       queryClient.invalidateQueries({ queryKey: ["dayflow", "dashboard", actor] }),
       queryClient.invalidateQueries({ queryKey: ["dayflow", "attendance", actor] }),
+      queryClient.invalidateQueries({ queryKey: ["dayflow", "people", actor] }),
       queryClient.invalidateQueries({ queryKey: ["dayflow", "leaves", actor] }),
       queryClient.invalidateQueries({ queryKey: ["dayflow", "activity", actor] }),
       queryClient.invalidateQueries({ queryKey: ["dayflow", "payroll", actor] }),
@@ -48,6 +49,12 @@ export function useDayflow(role: DayflowRole, enabled = dayflowApiEnabled) {
     queryKey: ["dayflow", "attendance", actor],
     queryFn: service.getAttendance,
     ...queryOptions,
+  })
+  const people = useQuery({
+    queryKey: ["dayflow", "people", actor],
+    queryFn: service.getPeople,
+    enabled: enabled && (role === "hr" || role === "admin"),
+    retry: 1,
   })
   const leaves = useQuery({
     queryKey: ["dayflow", "leaves", actor],
@@ -98,6 +105,7 @@ export function useDayflow(role: DayflowRole, enabled = dayflowApiEnabled) {
     me,
     dashboard,
     attendance,
+    people,
     leaves,
     payroll,
     activity,

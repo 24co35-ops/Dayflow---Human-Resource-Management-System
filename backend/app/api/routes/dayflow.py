@@ -469,6 +469,13 @@ def check_out(actor: DemoActor = Depends(get_dayflow_actor)) -> Attendance:
     return record
 
 
+@router.get("/people", response_model=list[Profile])
+def get_people(actor: DemoActor = Depends(get_dayflow_actor)) -> list[Profile]:
+    if actor.role not in ("hr", "admin"):
+        raise HTTPException(status_code=403, detail="Only HR or Admin can view the people directory")
+    return profiles
+
+
 @router.get("/payroll", response_model=list[PayrollSnapshot])
 def get_payroll(
     actor: DemoActor = Depends(get_dayflow_actor), profile_id: str | None = None

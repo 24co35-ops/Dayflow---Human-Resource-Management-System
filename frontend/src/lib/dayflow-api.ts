@@ -159,6 +159,7 @@ export function createDayflowClient(actor: DayflowActor) {
     getMe: () => request<DayflowProfile>(`/me?${query}`, actor),
     getDashboard: () => request<DayflowDashboard>(`/dashboard?${query}`, actor),
     getAttendance: () => request<DayflowAttendance[]>(`/attendance?${query}`, actor),
+    getPeople: () => request<DayflowProfile[]>(`/people?${query}`, actor),
     checkIn: () => request<DayflowAttendance>(`/attendance/check-in?${query}`, actor, { method: "POST" }),
     checkOut: () => request<DayflowAttendance>(`/attendance/check-out?${query}`, actor, { method: "POST" }),
     getLeaves: () => request<DayflowLeave[]>(`/leave-requests?${query}`, actor),
