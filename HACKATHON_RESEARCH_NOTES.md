@@ -45,3 +45,19 @@ Ship one coherent “day-in-the-life” workflow instead of a broad shallow HR s
 ## GitHub contribution constraint
 
 The selected repository belongs to `24co35-ops`; the user also named `ShivamGawade-XS`. A Git commit can only truthfully show the configured local author identity or a co-author trailer, and pushing on behalf of another GitHub account requires that account’s credentials/permissions. The build should therefore create clean, meaningful commits with authorship configured only from identities available in the session, and explicitly verify remote permissions before promising dual-account attribution.
+
+## Visual verification checkpoint
+
+The local Vite app renders successfully at `http://localhost:5173/`. The visual check confirmed the intended navy sidebar, lime accent, warm neutral canvas, responsive metric cards, Company Pulse, time-off cards, daily spark panel, and Flow call-to-action. The rendered controls include Employee view, HR view, Check in, Request time off, Attendance, Leave & time off, People, Payroll, and Ask Flow. The initial page is the Employee Overview, which is appropriate for the planned demo opening.
+
+## Flow interaction verification
+
+The live browser check opened Flow from the employee dashboard and successfully triggered the “Draft sick leave” prompt chip. Flow displayed a conversational response, a structured Action preview, and a `Confirm request` control. This validates the intended no-form-filling demo moment.
+
+## Cross-role handoff verification
+
+The browser check confirmed that after the employee confirms a leave request, switching to HR view updates the dashboard context to “HR command center,” shows People present at 84%, exposes the approval queue, and includes the new pending sick leave request alongside the seeded queue. This validates the primary employee-to-HR handoff narrative.
+
+## Kanban approval verification
+
+The HR leave workspace rendered the intended Pending / Approved / Rejected columns with accessible Approve and Reject buttons. Approving the new Arjun Singh request moved it into Approved, reduced Pending approvals from 02 to 01, and showed a success toast: “Leave approved and employee notified.”

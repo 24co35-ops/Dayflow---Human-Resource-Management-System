@@ -13,6 +13,8 @@ import {
   WalletCards,
 } from "lucide-react"
 
+import { supabaseMode } from "@/lib/supabase"
+
 export const Route = createFileRoute("/_layout")({
   component: Layout,
 })
@@ -70,7 +72,7 @@ function Layout() {
           <div className="flex items-center gap-3 lg:hidden"><div className="grid size-9 place-items-center rounded-xl bg-[#c7f36b] text-[#0e1c2f]"><Sparkles className="size-5" /></div><span className="font-display text-xl font-semibold">dayflow</span></div>
           <div className="hidden text-sm text-[#5d6876] sm:block">Saturday, <span className="font-semibold text-[#111c2e]">22 August 2026</span></div>
           <div className="flex items-center gap-3">
-            <div className="hidden items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold text-[#31704f] shadow-sm sm:flex"><span className="size-2 rounded-full bg-[#66c17a]" /> All systems live</div>
+            <div className="hidden items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold text-[#31704f] shadow-sm sm:flex"><span className={supabaseMode === "connected" ? "size-2 rounded-full bg-[#66c17a]" : "size-2 rounded-full bg-[#efbb54]"} /> {supabaseMode === "connected" ? "All systems live" : "Offline demo mode"}</div>
             <button className="relative grid size-10 place-items-center rounded-xl border border-[#dfe5e0] bg-white text-[#5d6876] transition hover:border-[#b8c5bd]" type="button"><Bell className="size-[18px]" /><span className="absolute right-2 top-2 size-1.5 rounded-full bg-[#eb6e5c]" /></button>
             <div className="flex items-center gap-2 rounded-xl border border-[#dfe5e0] bg-white py-1.5 pl-1.5 pr-2">
               <div className="grid size-8 place-items-center rounded-lg bg-[#f2c4ae] text-xs font-bold text-[#6e3222]">AS</div>
