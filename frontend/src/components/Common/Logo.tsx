@@ -1,11 +1,5 @@
 import { Link } from "@tanstack/react-router"
-
-import { useTheme } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
-import icon from "/assets/images/fastapi-icon.svg"
-import iconLight from "/assets/images/fastapi-icon-light.svg"
-import logo from "/assets/images/fastapi-logo.svg"
-import logoLight from "/assets/images/fastapi-logo-light.svg"
 
 interface LogoProps {
   variant?: "full" | "icon" | "responsive"
@@ -13,48 +7,29 @@ interface LogoProps {
   asLink?: boolean
 }
 
-export function Logo({
-  variant = "full",
-  className,
-  asLink = true,
-}: LogoProps) {
-  const { resolvedTheme } = useTheme()
-  const isDark = resolvedTheme === "dark"
+function DayflowMark({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={cn("size-9 shrink-0", className)} fill="none" viewBox="0 0 40 40">
+      <defs>
+        <linearGradient id="dayflow-mark" x1="4" x2="35" y1="4" y2="36" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#E9FFB0" />
+          <stop offset="1" stopColor="#9EDB50" />
+        </linearGradient>
+      </defs>
+      <rect fill="#13253B" height="38" rx="12" width="38" x="1" y="1" />
+      <path d="M12 26.5c0-5.6 3.8-10.2 9.1-11.5 3.1-.8 5.5-3 6.5-6.1" stroke="url(#dayflow-mark)" strokeLinecap="round" strokeWidth="3.2" />
+      <path d="M11.5 17.5h7.8M11.5 23h5" stroke="#F7FFD7" strokeLinecap="round" strokeWidth="2.4" />
+      <circle cx="28.5" cy="9" fill="#F7FFD7" r="2.2" />
+    </svg>
+  )
+}
 
-  const fullLogo = isDark ? logoLight : logo
-  const iconLogo = isDark ? iconLight : icon
+function FullLogo({ className }: { className?: string }) {
+  return <span className={cn("flex items-center gap-3", className)}><DayflowMark /><span className="min-w-0"><span className="block font-display text-xl font-semibold tracking-[-0.04em]">dayflow</span><span className="block text-[9px] uppercase tracking-[0.22em] text-current opacity-45">people operating system</span></span></span>
+}
 
-  const content =
-    variant === "responsive" ? (
-      <>
-        <img
-          src={fullLogo}
-          alt="FastAPI"
-          className={cn(
-            "h-6 w-auto group-data-[collapsible=icon]:hidden",
-            className,
-          )}
-        />
-        <img
-          src={iconLogo}
-          alt="FastAPI"
-          className={cn(
-            "size-5 hidden group-data-[collapsible=icon]:block",
-            className,
-          )}
-        />
-      </>
-    ) : (
-      <img
-        src={variant === "full" ? fullLogo : iconLogo}
-        alt="FastAPI"
-        className={cn(variant === "full" ? "h-6 w-auto" : "size-5", className)}
-      />
-    )
-
-  if (!asLink) {
-    return content
-  }
-
-  return <Link to="/">{content}</Link>
+export function Logo({ variant = "full", className, asLink = true }: LogoProps) {
+  const content = variant === "icon" ? <DayflowMark className={className} /> : variant === "responsive" ? <><span className="group-data-[collapsible=icon]:hidden"><FullLogo /></span><span className="hidden group-data-[collapsible=icon]:block"><DayflowMark className={className} /></span></> : <FullLogo className={className} />
+  if (!asLink) return content
+  return <Link aria-label="Dayflow home" to="/">{content}</Link>
 }
