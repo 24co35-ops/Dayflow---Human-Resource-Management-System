@@ -1,5 +1,7 @@
+import json
 import os
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -207,6 +209,65 @@ leave_requests = [
 ]
 
 activity_events: list[ActivityEvent] = []
+seed_attendance = [item.model_copy(deep=True) for item in attendance]
+seed_leave_requests = [item.model_copy(deep=True) for item in leave_requests]
+
+
+def _persistence_enabled() -> bool:
+    return (
+        os.getenv("DAYFLOW_DEMO_MODE", "false").lower() == "true"
+        and os.getenv("DAYFLOW_PERSIST_DEMO_STATE", "false").lower() == "true"
+    )
+
+
+def _state_path() -> Path:
+    return Path(os.getenv("DAYFLOW_STATE_FILE", "/tmp/dayflow-demo-state.json"))
+
+
+def _persist_state() -> None:
+    if not _persistence_enabled():
+        return
+    path = _state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "attendance": [item.model_dump(mode="json") for item in attendance],
+                "leave_requests": [item.model_dump(mode="json") for item in leave_requests],
+                "activity_events": [item.model_dump(mode="json") for item in activity_events],
+            },
+            indent=2,
+        )
+    )
+
+
+def _restore_state() -> None:
+    if not _persistence_enabled():
+        return
+    path = _state_path()
+    if not path.exists():
+        return
+    try:
+        payload = json.loads(path.read_text())
+        attendance[:] = [Attendance.model_validate(item) for item in payload["attendance"]]
+        leave_requests[:] = [
+            LeaveRequest.model_validate(item) for item in payload["leave_requests"]
+        ]
+        activity_events[:] = [
+            ActivityEvent.model_validate(item) for item in payload["activity_events"]
+        ]
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        # A corrupt demo file must not prevent the judge-facing app from starting.
+        attendance[:] = [item.model_copy(deep=True) for item in seed_attendance]
+        leave_requests[:] = [item.model_copy(deep=True) for item in seed_leave_requests]
+        activity_events.clear()
+
+
+def _reset_demo_state() -> None:
+    attendance[:] = [item.model_copy(deep=True) for item in seed_attendance]
+    leave_requests[:] = [item.model_copy(deep=True) for item in seed_leave_requests]
+    activity_events.clear()
+    _persist_state()
 
 
 def _record(
@@ -228,6 +289,7 @@ def _record(
             created_at=datetime.now(timezone.utc),
         ),
     )
+    _persist_state()
 
 
 def _profile(profile_id: str) -> Profile:
@@ -239,6 +301,9 @@ def _profile(profile_id: str) -> Profile:
 
 def _overlaps(left_start: date, left_end: date, right_start: date, right_end: date) -> bool:
     return left_start <= right_end and right_start <= left_end
+
+
+_restore_state()
 
 
 @router.get("/me", response_model=Profile)
@@ -255,6 +320,15 @@ def get_me(actor: DemoActor = Depends(get_dayflow_actor)) -> Profile:
             job_position="People Operations Lead",
         )
     return _profile(actor.profile_id)
+
+
+@router.post("/demo/reset", response_model=dict[str, bool])
+def reset_demo(actor: DemoActor = Depends(get_dayflow_actor)) -> dict[str, bool]:
+    if actor.role not in ("hr", "admin"):
+        raise HTTPException(status_code=403, detail="Only HR or Admin can reset demo state")
+    _reset_demo_state()
+    _record(actor.profile_id, "demo.reset", "demo", "seed", "Demo state reset to seed data")
+    return {"ok": True}
 
 
 @router.get("/dashboard")

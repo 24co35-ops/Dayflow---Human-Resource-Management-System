@@ -144,3 +144,38 @@ def test_supabase_profile_policy_blocks_role_escalation() -> None:
     assert 'create policy "profile self update safe"' in migration
     assert "prevent_profile_privilege_escalation" in migration
     assert "new.role is distinct from old.role" in migration
+
+
+def test_demo_state_round_trips_to_disk(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import app.api.routes.dayflow as dayflow
+
+    monkeypatch.setenv("DAYFLOW_DEMO_MODE", "true")
+    monkeypatch.setenv("DAYFLOW_PERSIST_DEMO_STATE", "true")
+    monkeypatch.setenv("DAYFLOW_STATE_FILE", str(tmp_path / "state.json"))
+    record = dayflow.Attendance(
+        id="att-round-trip",
+        profile_id="emp-001",
+        attendance_date=dayflow.date.today(),
+        status="present",
+        worked_minutes=123,
+    )
+    request = dayflow.LeaveRequest(
+        id="leave-round-trip",
+        profile_id="emp-001",
+        employee_name="Arjun Singh",
+        leave_type="paid",
+        start_date=dayflow.date(2026, 9, 1),
+        end_date=dayflow.date(2026, 9, 1),
+        days=1,
+    )
+    monkeypatch.setattr(dayflow, "attendance", [record])
+    monkeypatch.setattr(dayflow, "leave_requests", [request])
+    monkeypatch.setattr(dayflow, "activity_events", [])
+    dayflow._persist_state()
+    dayflow.attendance.clear()
+    dayflow.leave_requests.clear()
+    dayflow._restore_state()
+    assert dayflow.attendance[0].id == "att-round-trip"
+    assert dayflow.leave_requests[0].id == "leave-round-trip"
