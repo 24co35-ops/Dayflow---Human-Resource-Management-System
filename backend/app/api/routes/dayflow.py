@@ -1,0 +1,175 @@
+from datetime import date, datetime, timezone
+from typing import Literal
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+router = APIRouter(prefix="/dayflow", tags=["dayflow"])
+
+Role = Literal["employee", "hr", "admin"]
+LeaveStatus = Literal["pending", "approved", "rejected"]
+
+
+class Profile(BaseModel):
+    id: str
+    employee_code: str
+    full_name: str
+    email: str
+    role: Role
+    department: str
+    job_position: str
+    location: str = "Bengaluru"
+
+
+class Attendance(BaseModel):
+    id: str
+    profile_id: str
+    attendance_date: date
+    status: Literal["present", "absent", "half_day", "leave"]
+    check_in_at: datetime | None = None
+    check_out_at: datetime | None = None
+    worked_minutes: int = Field(default=0, ge=0)
+
+
+class LeaveRequest(BaseModel):
+    id: str
+    profile_id: str
+    employee_name: str
+    leave_type: Literal["paid", "sick", "unpaid"]
+    start_date: date
+    end_date: date
+    days: int = Field(gt=0)
+    remarks: str = ""
+    status: LeaveStatus = "pending"
+    review_comment: str | None = None
+
+
+class LeaveCreate(BaseModel):
+    leave_type: Literal["paid", "sick", "unpaid"]
+    start_date: date
+    end_date: date
+    remarks: str = Field(default="", max_length=500)
+
+    def validate_dates(self) -> None:
+        if self.end_date < self.start_date:
+            raise HTTPException(status_code=422, detail="End date must be on or after start date")
+
+
+class LeaveReview(BaseModel):
+    status: Literal["approved", "rejected"]
+    review_comment: str = Field(default="", max_length=500)
+
+
+class FlowMessage(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+
+
+class FlowResponse(BaseModel):
+    answer: str
+    action: dict[str, object] | None = None
+
+
+profiles = [
+    Profile(id="emp-001", employee_code="EMP-042", full_name="Arjun Singh", email="arjun@dayflow.demo", role="employee", department="Engineering", job_position="Software Engineer"),
+    Profile(id="emp-002", employee_code="EMP-043", full_name="Priya Nair", email="priya@dayflow.demo", role="employee", department="Design", job_position="Product Designer"),
+    Profile(id="emp-003", employee_code="EMP-044", full_name="Rahul Mehta", email="rahul@dayflow.demo", role="employee", department="Product", job_position="Product Manager"),
+    Profile(id="emp-004", employee_code="EMP-045", full_name="Meera Joshi", email="meera@dayflow.demo", role="employee", department="Finance", job_position="Finance Associate"),
+]
+
+attendance = [
+    Attendance(id="att-001", profile_id="emp-001", attendance_date=date.today(), status="present", worked_minutes=492),
+    Attendance(id="att-002", profile_id="emp-002", attendance_date=date.today(), status="present", worked_minutes=468),
+    Attendance(id="att-003", profile_id="emp-003", attendance_date=date.today(), status="half_day", worked_minutes=238),
+]
+
+leave_requests = [
+    LeaveRequest(id="leave-001", profile_id="emp-004", employee_name="Meera Joshi", leave_type="sick", start_date=date(2026, 8, 25), end_date=date(2026, 8, 26), days=2, remarks="Recovering from a fever"),
+    LeaveRequest(id="leave-002", profile_id="emp-001", employee_name="Arjun Singh", leave_type="paid", start_date=date(2026, 8, 20), end_date=date(2026, 8, 21), days=2, status="approved"),
+]
+
+
+def _profile(profile_id: str) -> Profile:
+    return next((item for item in profiles if item.id == profile_id), profiles[0])
+
+
+@router.get("/me", response_model=Profile)
+def get_me(role: Role = "employee") -> Profile:
+    """Return the fictional demo identity until Supabase Auth is configured."""
+    if role == "hr":
+        return Profile(id="hr-001", employee_code="HR-001", full_name="Ashwith Shetty", email="ashwith@dayflow.demo", role="hr", department="People Ops", job_position="People Operations Lead")
+    return profiles[0]
+
+
+@router.get("/dashboard")
+def get_dashboard(role: Role = "employee") -> dict[str, object]:
+    pending = sum(request.status == "pending" for request in leave_requests)
+    return {
+        "role": role,
+        "employee_count": len(profiles) + 1,
+        "pending_leaves": pending,
+        "present_today": sum(item.status == "present" for item in attendance),
+        "absent_today": sum(item.status == "absent" for item in attendance),
+        "pulse": [{"name": _profile(item.profile_id).full_name, "status": item.status, "check_in_at": item.check_in_at} for item in attendance],
+        "recent_activity": ["Leave request from Meera Joshi just arrived", "Rahul Mehta marked half-day", "August payroll is ready"],
+    }
+
+
+@router.get("/attendance", response_model=list[Attendance])
+def get_attendance(role: Role = "employee", profile_id: str | None = None) -> list[Attendance]:
+    if role not in ("hr", "admin"):
+        profile_id = profile_id or "emp-001"
+        return [item for item in attendance if item.profile_id == profile_id]
+    return attendance
+
+
+@router.post("/attendance/check-in", response_model=Attendance)
+def check_in(profile_id: str = "emp-001") -> Attendance:
+    existing = next((item for item in attendance if item.profile_id == profile_id and item.attendance_date == date.today()), None)
+    if existing:
+        if existing.check_in_at is None:
+            existing.check_in_at = datetime.now(timezone.utc)
+        existing.status = "present"
+        return existing
+    record = Attendance(id=f"att-{len(attendance) + 1:03}", profile_id=profile_id, attendance_date=date.today(), status="present", check_in_at=datetime.now(timezone.utc))
+    attendance.append(record)
+    return record
+
+
+@router.post("/leave-requests", response_model=LeaveRequest, status_code=201)
+def create_leave(payload: LeaveCreate, profile_id: str = "emp-001") -> LeaveRequest:
+    payload.validate_dates()
+    days = (payload.end_date - payload.start_date).days + 1
+    request = LeaveRequest(id=f"leave-{len(leave_requests) + 1:03}", profile_id=profile_id, employee_name=_profile(profile_id).full_name, days=days, **payload.model_dump())
+    leave_requests.insert(0, request)
+    return request
+
+
+@router.get("/leave-requests", response_model=list[LeaveRequest])
+def get_leave_requests(role: Role = "employee", profile_id: str | None = None) -> list[LeaveRequest]:
+    if role in ("hr", "admin"):
+        return leave_requests
+    return [item for item in leave_requests if item.profile_id == (profile_id or "emp-001")]
+
+
+@router.patch("/leave-requests/{request_id}", response_model=LeaveRequest)
+def review_leave(request_id: str, payload: LeaveReview, role: Role = "hr") -> LeaveRequest:
+    if role not in ("hr", "admin"):
+        raise HTTPException(status_code=403, detail="Only HR or Admin can review leave")
+    request = next((item for item in leave_requests if item.id == request_id), None)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+    request.status = payload.status
+    request.review_comment = payload.review_comment
+    return request
+
+
+@router.post("/flow/message", response_model=FlowResponse)
+def flow_message(payload: FlowMessage, role: Role = "employee") -> FlowResponse:
+    message = payload.message.lower()
+    if "leave" in message or "off" in message or "sick" in message:
+        return FlowResponse(answer="I can draft a 2-day Sick Leave request for 25–26 August. It will remain pending until HR reviews it.", action={"action": "apply_leave", "data": {"leave_type": "sick", "start_date": "2026-08-25", "end_date": "2026-08-26", "remarks": payload.message}})
+    if "absent" in message or "attendance" in message:
+        return FlowResponse(answer="Rahul Mehta has the highest absence signal this week with 2 missed days. Karan Shah has not checked in today.")
+    if "pay" in message or "salary" in message or "payslip" in message:
+        return FlowResponse(answer="The latest payroll snapshot is ready. Net salary is ₹51,800 after PF and professional tax deductions.")
+    return FlowResponse(answer=f"I’m Flow. I can help with attendance, leave, payroll, or your profile. You are signed in as {role}.")
