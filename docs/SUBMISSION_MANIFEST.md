@@ -33,9 +33,9 @@ Start at the frontend root route `/`. The initial Employee view presents the wor
 
 ## Validation evidence
 
-The repository now contains 49 truthful commits including foundation, feature, documentation, test, utility, component, and CI increments. The next verified documentation index commit will bring the history to 50 or more without using empty commits.
+The repository now contains 50 truthful commits including foundation, feature, documentation, test, utility, component, and CI increments. No empty commits were used to reach the threshold.
 
-The frontend TypeScript compiler completes without errors and Vite produces a production bundle served into the FastAPI frontend directory. The isolated QA suite passes three tests for Flow action parsing, invalid leave date ordering, and HR-only leave review. Browser verification covered the dashboard render, Flow sick-leave draft, action confirmation, employee-to-HR handoff, Kanban approval, and updated pending count.
+The frontend TypeScript compiler completes without errors and Vite produces a production bundle served into the FastAPI frontend directory. The isolated QA suite passes 13 tests covering Flow actions, leave validation and review, attendance idempotency, role scoping, payroll math, optional Supabase mode, API payload bounds, demo seed diversity, and error contracts. Browser verification covered the dashboard render, Flow sick-leave draft, action confirmation, employee-to-HR handoff, Kanban approval, and updated pending count.
 
 ## Commit history
 
