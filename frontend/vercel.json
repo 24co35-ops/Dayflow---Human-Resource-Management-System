@@ -1,0 +1,7 @@
+{
+  "framework": "vite",
+  "buildCommand": "VERCEL=1 bun run build",
+  "outputDirectory": "dist",
+  "cleanUrls": false,
+  "rewrites": [{ "source": "/", "destination": "/index.html" }]
+}

@@ -221,3 +221,40 @@ def test_employee_can_only_read_own_profile() -> None:
 
     own_profile = dayflow.get_person("emp-001", actor=EMPLOYEE_ACTOR)
     assert own_profile.employee_code == "EMP-042"
+
+
+def test_leave_attachment_size_requires_a_filename() -> None:
+    with pytest.raises(ValueError, match="Attachment name is required"):
+        LeaveCreate(
+            leave_type="sick",
+            start_date="2026-08-28",
+            end_date="2026-08-28",
+            attachment_size=1200,
+        )
+
+
+def test_payroll_counts_only_cross_month_leave_days(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.api.routes.dayflow as dayflow
+    from datetime import timedelta
+
+    today = dayflow.date.today()
+    period_start = today.replace(day=1)
+    period_end = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    next_month_start = period_end + timedelta(days=1)
+    cross_month_leave = dayflow.LeaveRequest(
+        id="leave-cross-month",
+        profile_id="emp-001",
+        employee_name="Arjun Singh",
+        leave_type="paid",
+        start_date=period_end,
+        end_date=next_month_start,
+        days=2,
+        status="approved",
+    )
+    monkeypatch.setattr(dayflow, "attendance", [])
+    monkeypatch.setattr(dayflow, "leave_requests", [cross_month_leave])
+
+    payable_days, scheduled_days = dayflow._payroll_days("emp-001")
+
+    assert scheduled_days == 22
+    assert payable_days == 1

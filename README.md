@@ -43,6 +43,10 @@ uv run fastapi dev app/main.py
 
 The API endpoints are under `/api/v1/dayflow`. The default offline adapter is deliberately fictional and safe for the hackathon. Configure Supabase using `.env.example` and apply `supabase/migrations/202608220001_dayflow_schema.sql` before connecting real data.
 
+### Deploy the frontend to Vercel
+
+Vercel is configured with `frontend/` as the project root. The Vercel build sets `VERCEL=1` so Vite publishes `frontend/dist`, while local and FastAPI-served builds continue to publish `backend/app/frontend`. From the repository root, authenticate with Vercel and deploy with `npx vercel --cwd frontend --prod`; use `npx vercel --cwd frontend --temporary` for an expiring preview without an account. This deploys the frontend only. The FastAPI service and Supabase data boundary must be hosted and configured separately before enabling `VITE_DAYFLOW_API_ENABLED=true`.
+
 ## Demo identities
 
 The UI role switcher is a judging convenience. The backend exposes the same concept as `GET /api/v1/dayflow/me?role=employee` and `GET /api/v1/dayflow/me?role=hr`. All names, email addresses, attendance records, and salary values are synthetic.

@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import json
 import os
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -113,7 +115,9 @@ class LeaveCreate(BaseModel):
     attachment_size: int | None = Field(default=None, ge=1, le=5_000_000)
 
     @model_validator(mode="after")
-    def validate_attachment(self) -> "LeaveCreate":
+    def validate_attachment(self) -> LeaveCreate:
+        if self.attachment_size is not None and not self.attachment_name:
+            raise ValueError("Attachment name is required when attachment size is supplied")
         if self.attachment_name:
             extension = self.attachment_name.lower().rsplit(".", 1)[-1] if "." in self.attachment_name else ""
             if extension not in {"pdf", "png", "jpg", "jpeg"}:
@@ -417,8 +421,20 @@ def _overlaps(left_start: date, left_end: date, right_start: date, right_end: da
     return left_start <= right_end and right_start <= left_end
 
 
+def _leave_days_in_period(
+    item: LeaveRequest, period_start: date, period_end: date
+) -> int:
+    overlap_start = max(item.start_date, period_start)
+    overlap_end = min(item.end_date, period_end)
+    return max(0, (overlap_end - overlap_start).days + 1)
+
+
 def _payroll_days(profile_id: str) -> tuple[int, int]:
     period_year, period_month = date.today().year, date.today().month
+    period_start = date(period_year, period_month, 1)
+    period_end = (
+        period_start.replace(day=28) + timedelta(days=4)
+    ).replace(day=1) - timedelta(days=1)
     attended = sum(
         1 if item.status == "present" else 0.5
         for item in attendance
@@ -428,22 +444,20 @@ def _payroll_days(profile_id: str) -> tuple[int, int]:
         and item.status in ("present", "half_day")
     )
     paid_leave = sum(
-        item.days
+        _leave_days_in_period(item, period_start, period_end)
         for item in leave_requests
         if item.profile_id == profile_id
         and item.status == "approved"
         and item.leave_type != "unpaid"
-        and item.start_date.year == period_year
-        and item.start_date.month == period_month
+        and _overlaps(item.start_date, item.end_date, period_start, period_end)
     )
     unpaid_leave = sum(
-        item.days
+        _leave_days_in_period(item, period_start, period_end)
         for item in leave_requests
         if item.profile_id == profile_id
         and item.status == "approved"
         and item.leave_type == "unpaid"
-        and item.start_date.year == period_year
-        and item.start_date.month == period_month
+        and _overlaps(item.start_date, item.end_date, period_start, period_end)
     )
     scheduled_days = 22
     payable_days = max(0, min(scheduled_days, round(attended + paid_leave - unpaid_leave)))
