@@ -71,25 +71,12 @@ jobs:
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Get PR Push token
-        id: pr-push
+      - name: Verify formatting is clean
         if: env.CAN_PUSH == 'true' && steps.changes.outputs.changed == 'true'
-        uses: tiangolo/pr-push@ff4e51a433de4c22bbf90597e069e8247b9203d2 # 0.0.1
-      - name: Commit and push changes
-        if: env.CAN_PUSH == 'true' && steps.changes.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ steps.pr-push.outputs.token }}
         run: |
-          git config user.name "pr-push[bot]"
-          git config user.email "pr-push[bot]@users.noreply.github.com"
-          gh auth setup-git
-          git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "🎨 Auto format and update with pre-commit"
-            git push
-          fi
+          echo "Pre-commit changed files. Please run prek locally and push the formatted result."
+          git diff --stat
+          git diff --exit-code
       - uses: pre-commit-ci/lite-action@5d6cc0eb514c891a40562a58a8e71576c5c7fb43 # v1.1.0
         if: env.CAN_PUSH == 'false'
         with:
