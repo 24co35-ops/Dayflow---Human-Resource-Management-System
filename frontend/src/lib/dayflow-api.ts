@@ -14,6 +14,23 @@ export type DayflowProfile = {
   department: string
   job_position: string
   location: string
+  phone?: string
+  manager?: string
+  joining_year?: number
+}
+
+export type DayflowEmployeeInput = {
+  full_name: string
+  email: string
+  department: string
+  job_position: string
+  joining_year: number
+  phone?: string
+  location?: string
+}
+
+export type DayflowProvisionedEmployee = DayflowProfile & {
+  temporary_password: string
 }
 
 export type DayflowAttendance = {
@@ -160,6 +177,12 @@ export function createDayflowClient(actor: DayflowActor) {
     getDashboard: () => request<DayflowDashboard>(`/dashboard?${query}`, actor),
     getAttendance: () => request<DayflowAttendance[]>(`/attendance?${query}`, actor),
     getPeople: () => request<DayflowProfile[]>(`/people?${query}`, actor),
+    getPerson: (profileId: string) => request<DayflowProfile>(`/people/${profileId}?${query}`, actor),
+    createPerson: (input: DayflowEmployeeInput) =>
+      request<DayflowProvisionedEmployee>(`/people?${query}`, actor, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
     checkIn: () => request<DayflowAttendance>(`/attendance/check-in?${query}`, actor, { method: "POST" }),
     checkOut: () => request<DayflowAttendance>(`/attendance/check-out?${query}`, actor, { method: "POST" }),
     getLeaves: () => request<DayflowLeave[]>(`/leave-requests?${query}`, actor),

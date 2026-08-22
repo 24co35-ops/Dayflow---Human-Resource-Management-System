@@ -177,3 +177,47 @@ def test_demo_state_round_trips_to_disk(
     dayflow._restore_state()
     assert dayflow.attendance[0].id == "att-round-trip"
     assert dayflow.leave_requests[0].id == "leave-round-trip"
+
+
+def test_hr_provisioning_generates_collision_safe_login_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.api.routes.dayflow as dayflow
+
+    monkeypatch.setattr(
+        dayflow,
+        "profiles",
+        [
+            dayflow.Profile(
+                id="emp-existing",
+                employee_code="OIJODO20220001",
+                full_name="John Doe",
+                email="john@example.test",
+                role="employee",
+                department="Engineering",
+                job_position="Developer",
+                joining_year=2022,
+            )
+        ],
+    )
+    provisioned = dayflow.create_person(
+        dayflow.EmployeeCreate(
+            full_name="John Doe",
+            email="new-john@example.test",
+            department="Engineering",
+            job_position="Senior Developer",
+            joining_year=2022,
+        ),
+        actor=HR_ACTOR,
+    )
+    assert provisioned.employee_code == "OIJODO20220002"
+    assert provisioned.temporary_password == "Dayflow-0002!"
+
+
+def test_employee_can_only_read_own_profile() -> None:
+    import app.api.routes.dayflow as dayflow
+
+    with pytest.raises(HTTPException) as error:
+        dayflow.get_person("emp-002", actor=EMPLOYEE_ACTOR)
+    assert error.value.status_code == 403
+
+    own_profile = dayflow.get_person("emp-001", actor=EMPLOYEE_ACTOR)
+    assert own_profile.employee_code == "EMP-042"

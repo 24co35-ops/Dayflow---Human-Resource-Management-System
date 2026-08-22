@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import {
   createDayflowClient,
   type DayflowActor,
+  type DayflowEmployeeInput,
   type DayflowLeaveInput,
   type DayflowRole,
 } from "@/lib/dayflow-api"
@@ -80,6 +81,10 @@ export function useDayflow(role: DayflowRole, enabled = dayflowApiEnabled) {
     mutationFn: service.checkOut,
     onSuccess: invalidateWorkspace,
   })
+  const createPerson = useMutation({
+    mutationFn: (input: DayflowEmployeeInput) => service.createPerson(input),
+    onSuccess: invalidateWorkspace,
+  })
   const createLeave = useMutation({
     mutationFn: (input: DayflowLeaveInput) => service.createLeave(input),
     onSuccess: invalidateWorkspace,
@@ -111,6 +116,7 @@ export function useDayflow(role: DayflowRole, enabled = dayflowApiEnabled) {
     activity,
     checkIn,
     checkOut,
+    createPerson,
     createLeave,
     reviewLeave,
     flowMessage,

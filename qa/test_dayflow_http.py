@@ -204,3 +204,46 @@ def test_http_rejects_role_profile_mismatch(client: TestClient) -> None:
         },
     )
     assert response.status_code == 403
+
+
+def test_http_hr_can_provision_employee_with_generated_login_id(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/dayflow/people",
+        headers={
+            "X-Dayflow-Demo-Role": "hr",
+            "X-Dayflow-Demo-Profile-Id": "hr-001",
+        },
+        json={
+            "full_name": "John Doe",
+            "email": "john-http@example.test",
+            "department": "Engineering",
+            "job_position": "Developer",
+            "joining_year": 2026,
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["employee_code"].startswith("OIJODO2026")
+    assert body["temporary_password"].startswith("Dayflow-")
+
+
+def test_http_employee_cannot_provision_or_read_another_profile(client: TestClient) -> None:
+    headers = {
+        "X-Dayflow-Demo-Role": "employee",
+        "X-Dayflow-Demo-Profile-Id": "emp-001",
+    }
+    create_response = client.post(
+        "/api/v1/dayflow/people",
+        headers=headers,
+        json={
+            "full_name": "Blocked User",
+            "email": "blocked@example.test",
+            "department": "Engineering",
+            "job_position": "Developer",
+            "joining_year": 2026,
+        },
+    )
+    assert create_response.status_code == 403
+
+    profile_response = client.get("/api/v1/dayflow/people/emp-002", headers=headers)
+    assert profile_response.status_code == 403

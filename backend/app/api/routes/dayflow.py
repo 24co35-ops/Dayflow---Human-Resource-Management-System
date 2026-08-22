@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -55,6 +56,23 @@ class Profile(BaseModel):
     department: str
     job_position: str
     location: str = "Bengaluru"
+    phone: str = ""
+    manager: str = ""
+    joining_year: int = Field(default=2026, ge=2000, le=2100)
+
+
+class EmployeeCreate(BaseModel):
+    full_name: str = Field(min_length=2, max_length=120)
+    email: str = Field(min_length=5, max_length=160)
+    department: str = Field(min_length=2, max_length=80)
+    job_position: str = Field(min_length=2, max_length=120)
+    joining_year: int = Field(default=2026, ge=2000, le=2100)
+    phone: str = Field(default="", max_length=30)
+    location: str = Field(default="Bengaluru", max_length=80)
+
+
+class EmployeeProvisioned(Profile):
+    temporary_password: str
 
 
 class Attendance(BaseModel):
@@ -225,6 +243,7 @@ leave_requests = [
 ]
 
 activity_events: list[ActivityEvent] = []
+seed_profiles = [item.model_copy(deep=True) for item in profiles]
 seed_attendance = [item.model_copy(deep=True) for item in attendance]
 seed_leave_requests = [item.model_copy(deep=True) for item in leave_requests]
 
@@ -256,6 +275,7 @@ def _persist_state() -> None:
     path.write_text(
         json.dumps(
             {
+                "profiles": [item.model_dump(mode="json") for item in profiles],
                 "attendance": [item.model_dump(mode="json") for item in attendance],
                 "leave_requests": [item.model_dump(mode="json") for item in leave_requests],
                 "activity_events": [item.model_dump(mode="json") for item in activity_events],
@@ -273,6 +293,7 @@ def _restore_state() -> None:
         return
     try:
         payload = json.loads(path.read_text())
+        profiles[:] = [Profile.model_validate(item) for item in payload["profiles"]]
         attendance[:] = [Attendance.model_validate(item) for item in payload["attendance"]]
         leave_requests[:] = [
             LeaveRequest.model_validate(item) for item in payload["leave_requests"]
@@ -282,12 +303,14 @@ def _restore_state() -> None:
         ]
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
         # A corrupt demo file must not prevent the judge-facing app from starting.
+        profiles[:] = [item.model_copy(deep=True) for item in seed_profiles]
         attendance[:] = [item.model_copy(deep=True) for item in seed_attendance]
         leave_requests[:] = [item.model_copy(deep=True) for item in seed_leave_requests]
         activity_events.clear()
 
 
 def _reset_demo_state() -> None:
+    profiles[:] = [item.model_copy(deep=True) for item in seed_profiles]
     attendance[:] = [item.model_copy(deep=True) for item in seed_attendance]
     leave_requests[:] = [item.model_copy(deep=True) for item in seed_leave_requests]
     activity_events.clear()
@@ -321,6 +344,19 @@ def _profile(profile_id: str) -> Profile:
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     return profile
+
+
+def _generated_employee_code(full_name: str, joining_year: int) -> str:
+    parts = [part for part in re.split(r"\s+", full_name.strip().upper()) if part]
+    first = (parts[0] if parts else "XX")[:2].ljust(2, "X")
+    last = (parts[-1] if len(parts) > 1 else parts[0] if parts else "XX")[:2].ljust(2, "X")
+    prefix = f"OI{first}{last}{joining_year}"
+    serials = [
+        int(match.group(1))
+        for profile in profiles
+        if (match := re.fullmatch(rf"{re.escape(prefix)}(\d{{4}})", profile.employee_code))
+    ]
+    return f"{prefix}{max(serials, default=0) + 1:04d}"
 
 
 def _overlaps(left_start: date, left_end: date, right_start: date, right_end: date) -> bool:
@@ -474,6 +510,42 @@ def get_people(actor: DemoActor = Depends(get_dayflow_actor)) -> list[Profile]:
     if actor.role not in ("hr", "admin"):
         raise HTTPException(status_code=403, detail="Only HR or Admin can view the people directory")
     return profiles
+
+
+@router.get("/people/{profile_id}", response_model=Profile)
+def get_person(profile_id: str, actor: DemoActor = Depends(get_dayflow_actor)) -> Profile:
+    if actor.role not in ("hr", "admin") and actor.profile_id != profile_id:
+        raise HTTPException(status_code=403, detail="Employees can only view their own profile")
+    return _profile(profile_id)
+
+
+@router.post("/people", response_model=EmployeeProvisioned, status_code=201)
+def create_person(
+    payload: EmployeeCreate,
+    actor: DemoActor = Depends(get_dayflow_actor),
+) -> EmployeeProvisioned:
+    if actor.role not in ("hr", "admin"):
+        raise HTTPException(status_code=403, detail="Only HR or Admin can create employees")
+    normalized_email = payload.email.strip().lower()
+    if any(profile.email.lower() == normalized_email for profile in profiles):
+        raise HTTPException(status_code=409, detail="An employee with this email already exists")
+    profile = Profile(
+        id=f"emp-{len(profiles) + 1:03d}",
+        employee_code=_generated_employee_code(payload.full_name, payload.joining_year),
+        full_name=payload.full_name.strip(),
+        email=normalized_email,
+        role="employee",
+        department=payload.department.strip(),
+        job_position=payload.job_position.strip(),
+        location=payload.location.strip(),
+        phone=payload.phone.strip(),
+        manager="Ashwith Shetty",
+        joining_year=payload.joining_year,
+    )
+    profiles.append(profile)
+    temporary_password = f"Dayflow-{profile.employee_code[-4:]}!"
+    _record(actor.profile_id, "employee.created", "profile", profile.id, f"{profile.full_name} was added with {profile.employee_code}")
+    return EmployeeProvisioned(**profile.model_dump(), temporary_password=temporary_password)
 
 
 @router.get("/payroll", response_model=list[PayrollSnapshot])
