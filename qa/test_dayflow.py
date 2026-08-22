@@ -114,3 +114,16 @@ def test_non_pending_leave_cannot_be_reviewed(monkeypatch: pytest.MonkeyPatch) -
             role="hr",
         )
     assert error.value.status_code == 409
+
+
+def test_supabase_profile_policy_blocks_role_escalation() -> None:
+    migration = (
+        Path(__file__).parents[1]
+        / "supabase"
+        / "migrations"
+        / "202608220001_dayflow_schema.sql"
+    ).read_text()
+    assert 'create policy "profile self update"' not in migration
+    assert 'create policy "profile self update safe"' in migration
+    assert "prevent_profile_privilege_escalation" in migration
+    assert 'new.role is distinct from old.role' in migration
