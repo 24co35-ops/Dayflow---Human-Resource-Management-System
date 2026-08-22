@@ -17,7 +17,7 @@ import { useEffect, useState } from "react"
 
 import { MobileWorkspaceNav } from "@/components/MobileWorkspaceNav"
 import { dayflowApiEnabled } from "@/hooks/useDayflow"
-import { supabaseMode } from "@/lib/supabase"
+import { supabase, supabaseMode } from "@/lib/supabase"
 
 export const Route = createFileRoute("/_layout")({
   component: Layout,
@@ -39,6 +39,7 @@ const navigationSlug = (label: string) =>
 function Layout() {
   const [activeSlug, setActiveSlug] = useState("overview")
   const [demoRole, setDemoRole] = useState<DemoRole>("employee")
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
 
   useEffect(() => {
     const syncShell = () => {
@@ -56,8 +57,24 @@ function Layout() {
   }, [])
 
   const shellUser = demoRole === "hr"
-    ? { name: "Ashwith Shetty", role: "People Ops" }
-    : { name: "Arjun Singh", role: "Engineering" }
+    ? { name: "Ashwith Shetty", role: "People Ops", initials: "AS" }
+    : { name: "Arjun Singh", role: "Engineering", initials: "AS" }
+
+  const openProfile = () => {
+    setProfileMenuOpen(false)
+    window.location.hash = "profile"
+    window.dispatchEvent(new HashChangeEvent("hashchange"))
+  }
+
+  const logout = async () => {
+    try {
+      if (supabase) await supabase.auth.signOut()
+    } finally {
+      localStorage.removeItem("access_token")
+      localStorage.removeItem("dayflow-demo-role")
+      window.location.href = "/login"
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#f6f7f4] text-[#111c2e]">
@@ -108,10 +125,17 @@ function Layout() {
           <div className="flex items-center gap-3">
             <div className="hidden items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold text-[#31704f] shadow-sm sm:flex"><span className={dayflowApiEnabled || supabaseMode === "connected" ? "size-2 rounded-full bg-[#66c17a]" : "size-2 rounded-full bg-[#efbb54]"} /> {dayflowApiEnabled ? "API-backed demo" : supabaseMode === "connected" ? "Supabase configured" : "Offline demo mode"}</div>
             <button className="relative grid size-10 place-items-center rounded-xl border border-[#dfe5e0] bg-white text-[#5d6876] transition hover:border-[#b8c5bd]" type="button"><Bell className="size-[18px]" /><span className="absolute right-2 top-2 size-1.5 rounded-full bg-[#eb6e5c]" /></button>
-            <div className="flex items-center gap-2 rounded-xl border border-[#dfe5e0] bg-white py-1.5 pl-1.5 pr-2">
-              <div className="grid size-8 place-items-center rounded-lg bg-[#f2c4ae] text-xs font-bold text-[#6e3222]">AS</div>
-              <div className="hidden text-left sm:block"><div className="text-xs font-semibold">{shellUser.name}</div><div className="text-[10px] text-[#7b8792]">{shellUser.role}</div></div>
-              <ChevronDown className="size-3.5 text-[#7b8792]" />
+            <div className="relative">
+              <button aria-expanded={profileMenuOpen} aria-haspopup="menu" className="flex items-center gap-2 rounded-xl border border-[#dfe5e0] bg-white py-1.5 pl-1.5 pr-2 text-left transition hover:border-[#b8c5bd]" onClick={() => setProfileMenuOpen((open) => !open)} type="button">
+                <div className="grid size-8 place-items-center rounded-lg bg-[#f2c4ae] text-xs font-bold text-[#6e3222]">{shellUser.initials}</div>
+                <div className="hidden sm:block"><div className="text-xs font-semibold">{shellUser.name}</div><div className="text-[10px] text-[#7b8792]">{shellUser.role}</div></div>
+                <ChevronDown className="size-3.5 text-[#7b8792]" />
+              </button>
+              {profileMenuOpen && <div className="absolute right-0 top-12 z-30 w-52 rounded-xl border border-[#dfe5e0] bg-white p-1.5 shadow-xl" role="menu">
+                <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[#1e2c40] hover:bg-[#f4f7f2]" onClick={openProfile} role="menuitem" type="button">My Profile</button>
+                <div className="my-1 border-t border-[#edf0ec]" />
+                <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[#9b4e40] hover:bg-[#fff4ef]" onClick={() => { void logout() }} role="menuitem" type="button"><LogOut className="size-4" /> Log out</button>
+              </div>}
             </div>
           </div>
         </header>

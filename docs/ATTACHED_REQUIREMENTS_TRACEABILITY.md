@@ -7,13 +7,13 @@ This document converts the attached HRMS screen and behavior brief into an imple
 | Attached requirement | Current status | Fastest implementation target | Acceptance evidence |
 | --- | --- | --- | --- |
 | HRMS sign-up and sign-in pages | Partial | Retain template authentication pages and add Dayflow labels/logo treatment without enabling public employee registration. | Login and sign-up routes render; normal users cannot self-register. |
-| HR/Admin creates employee accounts | Partial | Add HR-only employee creation form using the existing protected people API, with generated login ID and one-time password. | HR creates an employee; generated credentials are displayed once and never stored in the UI. |
-| Login ID format `OI` + first two letters of first/last name + joining year + serial | Planned | Add a deterministic backend generator with collision-safe per-year serial allocation. | `OIJODO20220001`-style IDs are generated and unique within a company/year. |
+| HR/Admin creates employee accounts | Implemented | Keep the HR-only employee creation form and protected people API. | HR creates an employee; generated credentials are displayed once and never stored in the UI. |
+| Login ID format `OI` + first two letters of first/last name + joining year + serial | Implemented | Keep the deterministic backend generator with collision-safe per-year serial allocation in demo persistence. | `OIJODO20220001`-style IDs are generated and unique within a company/year. |
 | First password is system-generated and can be changed after login | Partial | Add server-generated temporary password marker and force-change-password state to the existing auth/profile boundary. | First login requires password change; new password is never returned after creation. |
 | Successful login lands on the Dayflow dashboard | Implemented | Keep root route as the authenticated Dayflow workspace. | Authenticated navigation resolves to `/`; protected route redirects unauthenticated users to login. |
 | Company logo/upload logo | Partial | Use existing logo boundary and add admin-only company branding upload metadata. | Admin can select a logo; shell uses the configured logo or safe default. |
-| Avatar dropdown contains My Profile and Log Out | Partial | Connect the existing shell avatar menu to profile navigation and auth logout. | Avatar menu exposes both actions and logout clears the session. |
-| Clickable employee cards open view-only employee information | Partial | Add an employee details route/modal with read-only profile fields and role-gated salary visibility. | Clicking a People card opens a non-editable profile view. |
+| Avatar dropdown contains My Profile and Log Out | Implemented | Keep the shell avatar menu connected to profile navigation and available session cleanup. | Avatar menu exposes both actions; My Profile opens the existing profile view and logout clears browser auth/demo state. |
+| Clickable employee cards open view-only employee information | Implemented | Keep accessible keyboard/click selection and the inline read-only profile panel. | Clicking or pressing Enter on a People row opens non-editable profile information. |
 
 ## Employee profile and salary visibility
 
@@ -31,12 +31,12 @@ This document converts the attached HRMS screen and behavior brief into an imple
 | --- | --- | --- | --- |
 | Fixed wage type | Implemented | Keep fixed-wage snapshot in the server-owned payroll DTO; add configurable salary structure. | Payroll payload identifies fixed wage and source employee. |
 | Basic, HRA, Standard Allowance, Performance Bonus, LTA, Fixed Allowance | Partial | Add salary component model with amount/percentage mode and dependency references. | Salary editor exposes all six components and calculated monthly values. |
-| Fixed amount or percentage computation type | Planned | Implement a pure payroll calculator with validated component definitions. | Fixed and percentage components calculate deterministically. |
-| Basic as percentage of wage; HRA as percentage of Basic | Partial | Encode component bases and recompute whenever wage changes. | Wage `₹50,000`, Basic `50%` yields `₹25,000`; HRA `50%` of Basic yields `₹12,500`. |
-| Fixed Allowance equals wage minus other components | Planned | Calculate residual allowance and reject negative residuals. | Component total never exceeds wage; invalid structures return `422`. |
-| PF rate and Professional Tax configuration | Partial | Add configurable deduction settings to salary policy and include them in payroll output. | PF and professional tax values are visible and calculated from the configured bases. |
+| Fixed amount or percentage computation type | Implemented | Keep the pure payroll calculator with validated component definitions. | Fixed and percentage components calculate deterministically in `qa/test_payroll_calculator.py`. |
+| Basic as percentage of wage; HRA as percentage of Basic | Implemented | Keep server-side component bases and dependency calculation. | Wage `₹50,000`, Basic `50%` yields `₹25,000`; HRA `50%` of Basic yields `₹12,500` in calculator tests. |
+| Fixed Allowance equals wage minus other components | Implemented | Keep residual allowance calculation and negative-residual validation. | Component total never exceeds wage; invalid structures fail calculator validation. |
+| PF rate and Professional Tax configuration | Implemented | Keep the demo salary policy defaults and server-calculated deductions. | PF and professional tax values are visible and calculated from configured bases in the payroll payload. |
 | Salary values update automatically when wage changes | Planned | Recompute server-side on every salary update and return a fresh snapshot. | Updating wage changes all dependent component amounts without a page reload. |
-| Attendance determines payable days; unpaid leave/missing attendance reduce pay | Planned | Add monthly payroll calculation from closed attendance and approved unpaid leave. | Payroll calculation explains payable days, deductions, and net result. |
+| Attendance determines payable days; unpaid leave/missing attendance reduce pay | Partial | Keep the attendance/leave-fed calculator, with the documented demo scheduled-day assumptions. | Payroll payload explains payable days and net result; full calendar/holiday accounting is not yet production payroll. |
 | Payslip generation | Partial | Keep existing PDF preview but bind every value to the server payroll snapshot and attendance calculation. | Downloaded PDF matches the displayed server response. |
 
 ## Attendance and employee directory
@@ -48,8 +48,8 @@ This document converts the attached HRMS screen and behavior brief into an imple
 | Attendance list defaults to current month/day-wise records | Partial | Add month filter and day-wise response fields to the attendance workspace. | Employee sees their current-month records; HR can inspect the current workforce day. |
 | HR/Admin sees attendance for all employees | Implemented | Keep protected HR attendance filter and add directory selector. | Employee is scoped to self; HR/Admin can query the workforce. |
 | Status indicators: green present, airplane leave, yellow absent | Partial | Derive status from attendance plus approved leave; avoid fixture-only labels. | Status is computed from server data and documented. |
-| Attendance is source for payslip payable days | Planned | Feed closed attendance and approved leave into payroll calculator. | Payroll test covers missing day and unpaid leave deduction. |
-| Employee cards show avatar, basic information, and status icon | Partial | Map protected people endpoint to the current People cards and add clickable details. | Cards render server profiles with accessible labels and status explanations. |
+| Attendance is source for payslip payable days | Implemented | Keep attendance and approved leave as calculator inputs. | Payroll tests cover missing attendance and unpaid leave deductions; API exposes payable days. |
+| Employee cards show avatar, basic information, and status icon | Implemented | Keep protected people mapping, accessible row selection, and attendance-derived status when records are available. | Directory rows render server profiles, status dots, and a read-only profile panel. |
 
 ## Time off and HR review
 
@@ -58,8 +58,8 @@ This document converts the attached HRMS screen and behavior brief into an imple
 | Employee can view own time off records | Implemented | Keep actor-scoped leave query and add allocation summary. | Employee cannot see another employee’s requests. |
 | HR/Admin can view and approve/reject all requests | Implemented | Keep protected review endpoint and add explicit review comments/status history. | HR approves/rejects pending requests; repeated review is rejected. |
 | Paid time off, sick leave, and unpaid leave | Implemented | Preserve allow-listed leave types and expose allocation balances. | Form and API reject unknown types. |
-| New request form has validity period, type, allocation, attachment, submit/discard | Partial | Add attachment metadata/storage boundary and explicit discard/reset behavior. | Form validates dates/type and preserves values on server error. |
-| Sick-leave certificate attachment | Planned | Add authenticated file upload metadata with size/type validation; do not trust filename alone. | Allowed file uploads are linked to the leave request and unauthorized files are inaccessible. |
+| New request form has validity period, type, allocation, attachment, submit/discard | Partial | Keep date/type validation, reset-on-success, and certificate metadata boundary. | Form validates dates/type and preserves values on server error; allocation enforcement and binary storage remain pending. |
+| Sick-leave certificate attachment | Partial | Keep extension/size validation and linked metadata; add authenticated object storage before production use. | PDF/PNG/JPG/JPEG metadata up to 5 MB is accepted and persisted; no file bytes or download ACLs are implemented. |
 | Leave conflicts are rejected | Implemented | Preserve overlap rule for pending/approved requests. | Overlapping request returns `409`. |
 
 ## Product and operational quality
