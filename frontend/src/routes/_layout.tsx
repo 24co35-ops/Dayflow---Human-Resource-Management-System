@@ -10,7 +10,6 @@ import {
   LogOut,
   Search,
   Settings,
-  Sparkles,
   X,
   Users,
   WalletCards,
@@ -19,6 +18,7 @@ import {
 import { useEffect, useState } from "react"
 
 import { MobileWorkspaceNav } from "@/components/MobileWorkspaceNav"
+import { Logo } from "@/components/Common/Logo"
 import { dayflowApiEnabled } from "@/hooks/useDayflow"
 import { supabase, supabaseMode } from "@/lib/supabase"
 
@@ -107,15 +107,7 @@ function Layout() {
   return (
     <div className="min-h-screen bg-[#f6f7f4] text-[#111c2e]">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-[244px] flex-col border-r border-[#dfe5e0] bg-[#0e1c2f] text-white lg:flex">
-        <div className="flex h-20 items-center gap-3 px-7">
-          <div className="grid size-9 place-items-center rounded-xl bg-[#c7f36b] text-[#0e1c2f] shadow-[0_0_0_5px_rgba(199,243,107,0.12)]">
-            <Sparkles className="size-5" strokeWidth={2.5} />
-          </div>
-          <div>
-            <div className="font-display text-xl font-semibold tracking-[-0.03em]">dayflow</div>
-            <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">people operating system</div>
-          </div>
-        </div>
+        <div className="flex h-20 items-center px-7 text-white"><Logo asLink={false} /></div>
         <div className="px-4 pt-7 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">Workspace</div>
         <nav className="mt-3 space-y-1 px-3">
           {navigation.map(({ label, icon: Icon }) => {
@@ -148,7 +140,7 @@ function Layout() {
       </aside>
       <div className="lg:pl-[244px]">
         <header className="sticky top-0 z-10 flex h-20 items-center justify-between border-b border-[#dfe5e0]/80 bg-[#f6f7f4]/90 px-5 backdrop-blur-xl sm:px-8">
-          <div className="flex items-center gap-3 lg:hidden"><div className="grid size-9 place-items-center rounded-xl bg-[#c7f36b] text-[#0e1c2f]"><Sparkles className="size-5" /></div><span className="font-display text-xl font-semibold">dayflow</span></div>
+          <div className="flex items-center gap-3 lg:hidden"><Logo asLink={false} className="text-[#111c2e]" /></div>
           <div className="hidden items-center gap-3 sm:flex"><div className="text-sm text-[#5d6876]">Saturday, <span className="font-semibold text-[#111c2e]">22 August 2026</span></div><button aria-label="Search workspace" className="hidden items-center gap-2 rounded-xl border border-[#dfe5e0] bg-white px-3 py-2 text-xs font-semibold text-[#7b8792] shadow-sm transition hover:border-[#b8c5bd] md:flex" onClick={() => setSearchOpen(true)} type="button"><Search className="size-3.5" /> Search workspace <kbd className="rounded bg-[#f1f4ef] px-1.5 py-0.5 text-[10px] text-[#9aa4ab]">⌘ K</kbd></button></div>
           <div className="flex items-center gap-3">
             <div className="hidden items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold text-[#31704f] shadow-sm sm:flex"><span className={dayflowApiEnabled || supabaseMode === "connected" ? "size-2 rounded-full bg-[#66c17a]" : "size-2 rounded-full bg-[#efbb54]"} /> {dayflowApiEnabled ? "API-backed demo" : supabaseMode === "connected" ? "Supabase configured" : "Offline demo mode"}</div>
