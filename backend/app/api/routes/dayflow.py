@@ -69,6 +69,16 @@ class FlowResponse(BaseModel):
     action: dict[str, object] | None = None
 
 
+class ActivityEvent(BaseModel):
+    id: str
+    actor_id: str
+    event_type: str
+    entity_type: str
+    entity_id: str
+    message: str
+    created_at: datetime
+
+
 profiles = [
     Profile(id="emp-001", employee_code="EMP-042", full_name="Arjun Singh", email="arjun@dayflow.demo", role="employee", department="Engineering", job_position="Software Engineer"),
     Profile(id="emp-002", employee_code="EMP-043", full_name="Priya Nair", email="priya@dayflow.demo", role="employee", department="Design", job_position="Product Designer"),
@@ -86,6 +96,12 @@ leave_requests = [
     LeaveRequest(id="leave-001", profile_id="emp-004", employee_name="Meera Joshi", leave_type="sick", start_date=date(2026, 8, 25), end_date=date(2026, 8, 26), days=2, remarks="Recovering from a fever"),
     LeaveRequest(id="leave-002", profile_id="emp-001", employee_name="Arjun Singh", leave_type="paid", start_date=date(2026, 8, 20), end_date=date(2026, 8, 21), days=2, status="approved"),
 ]
+
+activity_events: list[ActivityEvent] = []
+
+
+def _record(actor_id: str, event_type: str, entity_type: str, entity_id: str, message: str) -> None:
+    activity_events.insert(0, ActivityEvent(id=f"event-{len(activity_events) + 1:03}", actor_id=actor_id, event_type=event_type, entity_type=entity_type, entity_id=entity_id, message=message, created_at=datetime.now(timezone.utc)))
 
 
 def _profile(profile_id: str) -> Profile:
@@ -129,10 +145,19 @@ def check_in(profile_id: str = "emp-001") -> Attendance:
         if existing.check_in_at is None:
             existing.check_in_at = datetime.now(timezone.utc)
         existing.status = "present"
+        _record(profile_id, "attendance.checked_in", "attendance", existing.id, f"{_profile(profile_id).full_name} checked in")
         return existing
     record = Attendance(id=f"att-{len(attendance) + 1:03}", profile_id=profile_id, attendance_date=date.today(), status="present", check_in_at=datetime.now(timezone.utc))
     attendance.append(record)
+    _record(profile_id, "attendance.checked_in", "attendance", record.id, f"{_profile(profile_id).full_name} checked in")
     return record
+
+
+@router.get("/activity", response_model=list[ActivityEvent])
+def get_activity(role: Role = "employee", profile_id: str | None = None) -> list[ActivityEvent]:
+    if role in ("hr", "admin"):
+        return activity_events
+    return [event for event in activity_events if event.actor_id == (profile_id or "emp-001")]
 
 
 @router.post("/leave-requests", response_model=LeaveRequest, status_code=201)
@@ -141,6 +166,7 @@ def create_leave(payload: LeaveCreate, profile_id: str = "emp-001") -> LeaveRequ
     days = (payload.end_date - payload.start_date).days + 1
     request = LeaveRequest(id=f"leave-{len(leave_requests) + 1:03}", profile_id=profile_id, employee_name=_profile(profile_id).full_name, days=days, **payload.model_dump())
     leave_requests.insert(0, request)
+    _record(profile_id, "leave.created", "leave_request", request.id, f"{request.employee_name} requested {request.days} day(s) of {request.leave_type} leave")
     return request
 
 
@@ -160,6 +186,7 @@ def review_leave(request_id: str, payload: LeaveReview, role: Role = "hr") -> Le
         raise HTTPException(status_code=404, detail="Leave request not found")
     request.status = payload.status
     request.review_comment = payload.review_comment
+    _record("hr-001", f"leave.{payload.status}", "leave_request", request.id, f"{request.employee_name}'s leave was {payload.status} by HR")
     return request
 
 

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from pydantic import EmailStr
 from sqlalchemy import DateTime
+from sqlalchemy.orm import relationship
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -58,7 +59,7 @@ class User(UserBase, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
-    items: list[Item] = Relationship(back_populates="owner", cascade_delete=True)
+    items: list["Item"] = Relationship(sa_relationship=relationship("Item", back_populates="owner", cascade="all, delete-orphan"))
 
 
 # Properties to return via API, id is always required
