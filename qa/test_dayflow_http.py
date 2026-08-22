@@ -280,3 +280,21 @@ def test_http_leave_attachment_metadata_is_validated(client: TestClient) -> None
     )
     assert accepted.status_code == 201
     assert accepted.json()["attachment_name"] == "certificate.pdf"
+
+
+def test_http_leave_attachment_size_requires_name(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/dayflow/leave-requests",
+        headers={
+            "X-Dayflow-Demo-Role": "employee",
+            "X-Dayflow-Demo-Profile-Id": "emp-001",
+        },
+        json={
+            "leave_type": "sick",
+            "start_date": "2026-10-03",
+            "end_date": "2026-10-03",
+            "attachment_size": 1200,
+        },
+    )
+    assert response.status_code == 422
+    assert "Attachment name is required" in response.json()["detail"][0]["msg"]
