@@ -52,9 +52,7 @@ def test_employee_cannot_review_leave() -> None:
 
 def test_unknown_profile_is_not_silently_replaced() -> None:
     with pytest.raises(HTTPException) as error:
-        get_attendance(
-            actor=DemoActor(role="employee", profile_id="missing-profile")
-        )
+        get_attendance(actor=DemoActor(role="employee", profile_id="missing-profile"))
     assert error.value.status_code == 404
 
 
