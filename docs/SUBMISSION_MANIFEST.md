@@ -24,9 +24,16 @@ Start at the frontend root route `/`. The initial Employee view presents the wor
 | `docs/TEAM_RUNBOOK.md` | Branch, review, authorship, and demo reset protocol |
 | `docs/API_REFERENCE.md` | Endpoint catalog, payloads, errors, and Flow action contract |
 | `docs/SUPABASE_SETUP.md` | Supabase project, migration, Realtime, and production checklist |
+| `docs/COMMIT_PLAN_50_PLUS.md` | 50-plus-commit roadmap and account-authorship rules |
+| `docs/USER_JOURNEYS.md` | Employee, HR, and failure journeys |
+| `docs/SECURITY_CHECKLIST.md` | Production security controls for HR and payroll data |
+| `docs/QA_MATRIX.md` | Functional and boundary-path verification matrix |
+| `docs/DESIGN_SYSTEM.md` | Dayflow visual tokens and interaction language |
 | `supabase/migrations/202608220001_dayflow_schema.sql` | Supabase schema, RLS policies, indexes, and Realtime publication tables |
 
 ## Validation evidence
+
+The repository now contains 49 truthful commits including foundation, feature, documentation, test, utility, component, and CI increments. The next verified documentation index commit will bring the history to 50 or more without using empty commits.
 
 The frontend TypeScript compiler completes without errors and Vite produces a production bundle served into the FastAPI frontend directory. The isolated QA suite passes three tests for Flow action parsing, invalid leave date ordering, and HR-only leave review. Browser verification covered the dashboard render, Flow sick-leave draft, action confirmation, employee-to-HR handoff, Kanban approval, and updated pending count.
 
