@@ -25,12 +25,18 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { AsyncState } from "@/components/AsyncState"
-import { LeaveRequestForm } from "@/components/LeaveRequestForm"
+import { LeaveRequestForm, type LeaveDraft } from "@/components/LeaveRequestForm"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import {
+  DayflowApiError,
+  type DayflowLeave,
+  type DayflowLeaveInput,
+} from "@/lib/dayflow-api"
 import { cn } from "@/lib/utils"
+import { dayflowApiEnabled, useDayflow } from "@/hooks/useDayflow"
 
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
@@ -70,8 +76,36 @@ const initialLeaves: LeaveRequest[] = [
 
 const attendanceBars = [68, 82, 74, 94, 78, 88, 95, 81, 92, 86, 98, 90, 84, 95, 93, 87, 96, 89, 94, 91, 97]
 
+const leaveTypeLabels = { paid: "Paid time off", sick: "Sick leave", unpaid: "Unpaid leave" } as const
+
+function mapApiLeave(leave: DayflowLeave): LeaveRequest {
+  const start = new Date(`${leave.start_date}T00:00:00`)
+  const end = new Date(`${leave.end_date}T00:00:00`)
+  const formatDate = (value: Date) => value.toLocaleDateString("en-IN", { month: "short", day: "numeric" })
+  return {
+    id: leave.id,
+    name: leave.employee_name,
+    initials: leave.employee_name.split(" ").map((part) => part[0]).join("").slice(0, 2),
+    type: leaveTypeLabels[leave.leave_type],
+    dates: leave.start_date === leave.end_date ? formatDate(start) : `${formatDate(start)} – ${formatDate(end)}`,
+    days: leave.days,
+    status: leave.status,
+    tone: leave.status === "approved" ? "bg-[#d8efbd] text-[#3c6c32]" : leave.status === "rejected" ? "bg-[#f7d8d0] text-[#9b4e40]" : "bg-[#f1d3c9] text-[#8a4738]",
+  }
+}
+
+function leaveInputFromDraft(draft: LeaveDraft): DayflowLeaveInput {
+  const leaveType = draft.type === "Sick leave" ? "sick" : draft.type === "Unpaid leave" ? "unpaid" : "paid"
+  return { leave_type: leaveType, start_date: draft.startDate, end_date: draft.endDate, remarks: draft.remarks }
+}
+
+function getApiError(error: unknown): string {
+  return error instanceof DayflowApiError ? error.message : "Dayflow could not complete that action. Try again."
+}
+
 function Dashboard() {
   const [role, setRole] = useState<Role>("employee")
+  const dayflow = useDayflow(role)
   const [view, setView] = useState<View>("Overview")
   const [checkedIn, setCheckedIn] = useState(false)
   const [leaves, setLeaves] = useState(initialLeaves)
@@ -99,17 +133,40 @@ function Dashboard() {
     return () => window.removeEventListener("hashchange", syncView)
   }, [])
 
-  const pendingCount = leaves.filter((leave) => leave.status === "pending").length
-  const approvedCount = leaves.filter((leave) => leave.status === "approved").length
+  const apiLeaves = useMemo(
+    () => dayflow.leaves.data?.map(mapApiLeave) ?? null,
+    [dayflow.leaves.data],
+  )
+  const sortedLeaves = useMemo(() => apiLeaves ?? leaves, [apiLeaves, leaves])
+  const pendingCount = sortedLeaves.filter((leave) => leave.status === "pending").length
+  const approvedCount = sortedLeaves.filter((leave) => leave.status === "approved").length
   const currentUser = role === "hr" ? "Ashwith Shetty" : "Arjun Singh"
+  const todayAttendance = dayflow.attendance.data?.find(
+    (item) => item.attendance_date === new Date().toISOString().slice(0, 10),
+  )
+  const effectiveCheckedIn = dayflowApiEnabled
+    ? Boolean(todayAttendance?.check_in_at && !todayAttendance.check_out_at)
+    : checkedIn
 
-  const sortedLeaves = useMemo(() => leaves, [leaves])
+  useEffect(() => {
+    if (dayflowApiEnabled && dayflow.me.data) setRole(dayflow.me.data.role === "hr" ? "hr" : "employee")
+  }, [dayflow.me.data])
 
   const sendFlow = (prompt = flowInput) => {
     const trimmed = prompt.trim()
     if (!trimmed) return
     setFlowMessages((items) => [...items, { from: "user", text: trimmed }])
     setFlowInput("")
+    if (dayflowApiEnabled) {
+      dayflow.flowMessage.mutate(trimmed, {
+        onSuccess: (response) => {
+          setFlowMessages((items) => [...items, { from: "flow", text: response.answer }])
+          if (response.action?.action === "apply_leave") setDraftLeave(true)
+        },
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
     const lower = trimmed.toLowerCase()
     window.setTimeout(() => {
       if (lower.includes("leave") || lower.includes("off") || lower.includes("sick")) {
@@ -126,6 +183,23 @@ function Dashboard() {
   }
 
   const confirmLeave = () => {
+    const input: DayflowLeaveInput = {
+      leave_type: "sick",
+      start_date: "2026-08-25",
+      end_date: "2026-08-26",
+      remarks: "Requested through Flow",
+    }
+    if (dayflowApiEnabled) {
+      dayflow.createLeave.mutate(input, {
+        onSuccess: () => {
+          setDraftLeave(false)
+          toast.success("Leave request sent to People Ops")
+          setFlowMessages((items) => [...items, { from: "flow", text: "Done — your sick leave request is now Pending. I’ll keep it visible in your activity." }])
+        },
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
     const next: LeaveRequest = { id: `leave-${Date.now()}`, name: "Arjun Singh", initials: "AS", type: "Sick leave", dates: "Aug 25 – 26", days: 2, status: "pending", tone: "bg-[#d8efbd] text-[#3c6c32]" }
     setLeaves((items) => [next, ...items])
     setDraftLeave(false)
@@ -134,6 +208,14 @@ function Dashboard() {
   }
 
   const updateLeave = (id: string, status: LeaveStatus) => {
+    if (status === "pending") return
+    if (dayflowApiEnabled) {
+      dayflow.reviewLeave.mutate({ requestId: id, status }, {
+        onSuccess: () => toast.success(status === "approved" ? "Leave approved and employee notified" : "Leave request rejected"),
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
     setLeaves((items) => items.map((leave) => (leave.id === id ? { ...leave, status } : leave)))
     toast.success(status === "approved" ? "Leave approved and employee notified" : "Leave request rejected")
   }
@@ -147,8 +229,35 @@ function Dashboard() {
     window.dispatchEvent(new CustomEvent("dayflow-role-change"))
   }
 
+  const toggleAttendance = () => {
+    if (dayflowApiEnabled) {
+      const mutation = effectiveCheckedIn ? dayflow.checkOut : dayflow.checkIn
+      mutation.mutate(undefined, {
+        onSuccess: () => toast.success(effectiveCheckedIn ? "Checked out. Have a good evening!" : "Checked in. Your workday is live."),
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
+    setCheckedIn((value) => !value)
+    toast.success(effectiveCheckedIn ? "Checked out. Have a good evening!" : "Checked in at 09:18 AM")
+  }
+
+  const submitLeave = (draft: LeaveDraft) => {
+    if (dayflowApiEnabled) {
+      dayflow.createLeave.mutate(leaveInputFromDraft(draft), {
+        onSuccess: () => toast.success("Leave request submitted for HR review"),
+        onError: (error) => toast.error(getApiError(error)),
+      })
+      return
+    }
+    setLeaves((items) => [draft, ...items])
+    toast.success("Leave request submitted for HR review")
+  }
+
   return (
     <div className="space-y-7">
+      {dayflowApiEnabled && dayflow.isLoading && <div className="rounded-xl border border-[#dfe5e0] bg-white px-4 py-3 text-xs font-semibold text-[#65737f]" role="status">Syncing the latest Dayflow workspace…</div>}
+      {dayflowApiEnabled && dayflow.isError && <div className="rounded-xl border border-[#efc8bc] bg-[#fff4ef] px-4 py-3 text-xs font-semibold text-[#9b4e40]" role="alert">The Dayflow API is unavailable. Showing the last local fixture while you reconnect.</div>}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#7b8792]"><span className="size-2 rounded-full bg-[#c7f36b]" /> People operations / {role === "hr" ? "HR command center" : "My workday"}</div>
@@ -165,15 +274,15 @@ function Dashboard() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label={role === "hr" ? "People present" : "Today’s status"} value={role === "hr" ? "84%" : checkedIn ? "Checked in" : "Not checked in"} detail={role === "hr" ? "21 of 25 checked in" : checkedIn ? "Since 09:18 AM · on track" : "Start your workday in one tap"} icon={<CalendarCheck className="size-5" />} tone="lime" action={role === "employee" ? { label: checkedIn ? "Check out" : "Check in", onClick: () => { setCheckedIn((value) => !value); toast.success(checkedIn ? "Checked out. Have a good evening!" : "Checked in at 09:18 AM") } } : undefined} />
+        <MetricCard label={role === "hr" ? "People present" : "Today’s status"} value={role === "hr" ? "84%" : effectiveCheckedIn ? "Checked in" : "Not checked in"} detail={role === "hr" ? "21 of 25 checked in" : effectiveCheckedIn ? "Since 09:18 AM · on track" : "Start your workday in one tap"} icon={<CalendarCheck className="size-5" />} tone="lime" action={role === "employee" ? { label: effectiveCheckedIn ? "Check out" : "Check in", onClick: toggleAttendance } : undefined} />
         <MetricCard label={role === "hr" ? "Pending approvals" : "Leave balance"} value={role === "hr" ? String(pendingCount).padStart(2, "0") : "14 days"} detail={role === "hr" ? "Need your attention today" : "4 days used this year"} icon={<Clock3 className="size-5" />} tone="peach" action={role === "employee" ? { label: "Request time off", onClick: () => setView("Leave & time off") } : { label: "Review now", onClick: () => setView("Leave & time off") }} />
         <MetricCard label="Attendance streak" value="23 days" detail="You’re in a good rhythm" icon={<Flame className="size-5" />} tone="blue" action={{ label: "Keep it going", onClick: () => toast("Small habits build great teams") }} />
         <MetricCard label={role === "hr" ? "Team pulse" : "Next payday"} value={role === "hr" ? "Positive" : "31 Aug"} detail={role === "hr" ? "+12% energy this week" : "8 days from now"} icon={<TrendingUp className="size-5" />} tone="lavender" action={role === "hr" ? { label: "View insights", onClick: () => setView("Attendance") } : { label: "View salary", onClick: () => setView("Payroll") }} />
       </div>
 
-      {view === "Overview" && <Overview role={role} checkedIn={checkedIn} leaves={sortedLeaves} approvedCount={approvedCount} setView={selectView} updateLeave={updateLeave} />}
-      {view === "Attendance" && <AttendanceView role={role} checkedIn={checkedIn} />}
-      {view === "Leave & time off" && <LeaveView role={role} leaves={sortedLeaves} updateLeave={updateLeave} onDraft={() => { setFlowOpen(true); setDraftLeave(true) }} onSubmitLeave={(leave) => setLeaves((items) => [leave, ...items])} />}
+      {view === "Overview" && <Overview role={role} checkedIn={effectiveCheckedIn} leaves={sortedLeaves} approvedCount={approvedCount} setView={selectView} updateLeave={updateLeave} />}
+      {view === "Attendance" && <AttendanceView role={role} checkedIn={effectiveCheckedIn} />}
+      {view === "Leave & time off" && <LeaveView role={role} leaves={sortedLeaves} updateLeave={updateLeave} onDraft={() => { setFlowOpen(true); setDraftLeave(true) }} onSubmitLeave={submitLeave} />}
       {view === "People" && <PeopleView />}
       {view === "Payroll" && <PayrollView role={role} />}
       {view === "Profile" && <ProfileView role={role} />}
@@ -210,7 +319,7 @@ function LeaveMini({ leave, role, updateLeave }: { leave: LeaveRequest; role: Ro
 
 function AttendanceView({ role, checkedIn }: { role: Role; checkedIn: boolean }) { return <Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="flex flex-col justify-between gap-3 space-y-0 p-6 sm:flex-row sm:items-center"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">{role === "hr" ? "Team attendance" : "My attendance"}</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">August 2026 rhythm</CardTitle></div><div className="flex items-center gap-2"><Badge className="border-0 bg-[#eff8df] text-[#4f762e]">{role === "hr" ? "25 people" : checkedIn ? "Checked in" : "Not checked in"}</Badge><Button variant="outline" className="rounded-xl border-[#dfe5e0]">This month <ChevronRight className="ml-2 size-4" /></Button></div></CardHeader><CardContent className="p-6 pt-0"><div className="grid gap-4 md:grid-cols-3"><div className="rounded-xl bg-[#f6f8f5] p-4"><div className="text-xs text-[#7b8792]">Attendance rate</div><div className="mt-1 font-display text-3xl font-semibold">94.2%</div><div className="mt-2 text-xs font-semibold text-[#4e7a3c]">+4.8% vs last month</div></div><div className="rounded-xl bg-[#f6f8f5] p-4"><div className="text-xs text-[#7b8792]">Avg. workday</div><div className="mt-1 font-display text-3xl font-semibold">8h 12m</div><div className="mt-2 text-xs text-[#8b959e]">Target: 8h 00m</div></div><div className="rounded-xl bg-[#f6f8f5] p-4"><div className="text-xs text-[#7b8792]">On leave today</div><div className="mt-1 font-display text-3xl font-semibold">03</div><div className="mt-2 text-xs text-[#8b959e]">Across 2 departments</div></div></div><div className="mt-8"><div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">Daily presence signal</div><div className="flex items-center gap-3 text-[10px] text-[#84909a]"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#c7f36b]" /> Present</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#efbb54]" /> Late</span></div></div><div className="flex h-48 items-end gap-1.5 rounded-2xl bg-[#f8faf7] p-4">{attendanceBars.map((bar, index) => <div className="group relative flex-1" key={`${bar}-${index}`}><div className={cn("w-full rounded-t-md transition hover:opacity-75", bar > 90 ? "bg-[#c7f36b]" : bar > 80 ? "bg-[#dbeab9]" : "bg-[#efbb54]")} style={{ height: `${bar}%` }} /><div className="absolute -top-6 left-1/2 hidden -translate-x-1/2 rounded bg-[#0e1c2f] px-1.5 py-1 text-[9px] text-white group-hover:block">{bar}%</div></div>)}</div><div className="mt-2 flex justify-between px-1 text-[10px] text-[#a0a9b0]"><span>Aug 01</span><span>Aug 08</span><span>Aug 15</span><span>Aug 22</span></div></div></CardContent></Card> }
 
-function LeaveView({ role, leaves, updateLeave, onDraft, onSubmitLeave }: { role: Role; leaves: LeaveRequest[]; updateLeave: (id: string, status: LeaveStatus) => void; onDraft: () => void; onSubmitLeave: (leave: LeaveRequest) => void }) { const columns: LeaveStatus[] = ["pending", "approved", "rejected"]; return <div className="space-y-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Time off workspace</div><h2 className="mt-2 font-display text-3xl font-semibold tracking-[-0.05em]">Leave requests</h2></div>{role === "employee" && <Button className="rounded-xl bg-[#0e1c2f]" onClick={onDraft}><Sparkles className="mr-2 size-4 text-[#c7f36b]" /> Draft with Flow</Button>}</div>{role === "employee" && <LeaveRequestForm onSubmit={onSubmitLeave} />}<div className="grid gap-4 lg:grid-cols-3">{columns.map((status) => <div className="rounded-2xl bg-[#edf1ec] p-3" key={status}><div className="mb-3 flex items-center justify-between px-2 pt-1"><div className="text-xs font-bold uppercase tracking-[0.16em] text-[#6c7881]">{status}</div><Badge className="border-0 bg-white text-[#7c8790]">{leaves.filter((leave) => leave.status === status).length}</Badge></div><div className="space-y-3">{leaves.filter((leave) => leave.status === status).map((leave) => <LeaveCard key={leave.id} leave={leave} role={role} updateLeave={updateLeave} />)}</div>{status === "pending" && leaves.filter((leave) => leave.status === status).length === 0 && <div className="rounded-xl border border-dashed border-[#cfd8cf] p-7 text-center text-xs text-[#8c9791]">No requests waiting</div>}</div>)}</div></div> }
+function LeaveView({ role, leaves, updateLeave, onDraft, onSubmitLeave }: { role: Role; leaves: LeaveRequest[]; updateLeave: (id: string, status: LeaveStatus) => void; onDraft: () => void; onSubmitLeave: (leave: LeaveDraft) => void }) { const columns: LeaveStatus[] = ["pending", "approved", "rejected"]; return <div className="space-y-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Time off workspace</div><h2 className="mt-2 font-display text-3xl font-semibold tracking-[-0.05em]">Leave requests</h2></div>{role === "employee" && <Button className="rounded-xl bg-[#0e1c2f]" onClick={onDraft}><Sparkles className="mr-2 size-4 text-[#c7f36b]" /> Draft with Flow</Button>}</div>{role === "employee" && <LeaveRequestForm onSubmit={onSubmitLeave} />}<div className="grid gap-4 lg:grid-cols-3">{columns.map((status) => <div className="rounded-2xl bg-[#edf1ec] p-3" key={status}><div className="mb-3 flex items-center justify-between px-2 pt-1"><div className="text-xs font-bold uppercase tracking-[0.16em] text-[#6c7881]">{status}</div><Badge className="border-0 bg-white text-[#7c8790]">{leaves.filter((leave) => leave.status === status).length}</Badge></div><div className="space-y-3">{leaves.filter((leave) => leave.status === status).map((leave) => <LeaveCard key={leave.id} leave={leave} role={role} updateLeave={updateLeave} />)}</div>{status === "pending" && leaves.filter((leave) => leave.status === status).length === 0 && <div className="rounded-xl border border-dashed border-[#cfd8cf] p-7 text-center text-xs text-[#8c9791]">No requests waiting</div>}</div>)}</div></div> }
 function LeaveCard({ leave, role, updateLeave }: { leave: LeaveRequest; role: Role; updateLeave: (id: string, status: LeaveStatus) => void }) { return <div className="rounded-xl border border-[#e3e9e2] bg-white p-4 shadow-sm"><div className="flex items-start justify-between"><div className={cn("grid size-9 place-items-center rounded-lg text-[11px] font-bold", leave.tone)}>{leave.initials}</div><button className="text-[#b0b8bd]" type="button"><MoreHorizontal className="size-4" /></button></div><div className="mt-3 text-sm font-bold">{leave.name}</div><div className="mt-1 text-xs text-[#7f8b93]">{leave.type} · {leave.dates}</div><div className="mt-3 flex items-center justify-between text-[11px] text-[#919aa1]"><span>{leave.days} {leave.days === 1 ? "day" : "days"}</span>{leave.status === "pending" && role === "hr" ? <div className="flex gap-1"><button className="rounded-lg bg-[#dff3cc] px-2 py-1 font-bold text-[#4f7b3b]" onClick={() => updateLeave(leave.id, "approved")} type="button">Approve</button><button className="rounded-lg bg-[#fae8e0] px-2 py-1 font-bold text-[#9b4e40]" onClick={() => updateLeave(leave.id, "rejected")} type="button">Reject</button></div> : <span className="capitalize">{leave.status}</span>}</div></div> } 
 
 function PeopleView() { const [query, setQuery] = useState(""); const filtered = employees.filter((employee) => `${employee.name} ${employee.department}`.toLowerCase().includes(query.toLowerCase())); if (filtered.length === 0) return <AsyncState state="empty" />; return <Card className="rounded-2xl border-[#dfe5e0] bg-white shadow-sm"><CardHeader className="flex flex-col justify-between gap-4 space-y-0 p-6 sm:flex-row sm:items-center"><div><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7b8792]">Directory</div><CardTitle className="mt-2 font-display text-2xl tracking-[-0.04em]">Your people</CardTitle></div><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#a2acb2]" /><Input className="w-full rounded-xl border-[#dfe5e0] pl-9 sm:w-64" onChange={(event) => setQuery(event.target.value)} placeholder="Search people" value={query} /></div></CardHeader><CardContent className="p-0"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-y border-[#edf0ec] bg-[#fafbf9] text-xs text-[#7d8891]"><tr><th className="px-6 py-3 font-semibold">Person</th><th className="px-6 py-3 font-semibold">Department</th><th className="px-6 py-3 font-semibold">Today</th><th className="px-6 py-3 font-semibold">Workday</th><th className="px-6 py-3" /></tr></thead><tbody>{filtered.map((employee) => <tr className="border-b border-[#f0f2ef] last:border-0" key={employee.name}><td className="px-6 py-4"><div className="flex items-center gap-3"><div className={cn("grid size-9 place-items-center rounded-lg text-[11px] font-bold", employee.tone)}>{employee.initials}</div><div><div className="font-semibold">{employee.name}</div><div className="text-xs text-[#89949d]">{employee.role}</div></div></div></td><td className="px-6 py-4 text-[#6c7882]">{employee.department}</td><td className="px-6 py-4"><div className="flex items-center gap-2"><StatusDot status={employee.status} /><span className="capitalize text-[#6c7882]">{employee.status}</span></div></td><td className="px-6 py-4 text-[#6c7882]">{employee.time}</td><td className="px-6 py-4 text-right"><button className="text-[#98a2aa]" type="button"><MoreHorizontal className="size-4" /></button></td></tr>)}</tbody></table></div></CardContent></Card> }

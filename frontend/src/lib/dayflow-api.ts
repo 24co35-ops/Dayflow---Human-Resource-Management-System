@@ -97,7 +97,9 @@ export class DayflowApiError extends Error {
   }
 }
 
-const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "")
+const apiBase = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "")
+  .replace(/\/api\/v1\/?$/, "")
+  .replace(/\/$/, "")
 
 function actorHeaders(actor: DayflowActor): Record<string, string> {
   return {

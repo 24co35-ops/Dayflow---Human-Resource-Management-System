@@ -1,7 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { CalendarDays, Send } from "lucide-react"
 import { useForm } from "react-hook-form"
-import { toast } from "sonner"
 import { z } from "zod"
 
 import { Button } from "@/components/ui/button"
@@ -19,7 +18,7 @@ const leaveSchema = z.object({
 })
 
 type FormValues = z.infer<typeof leaveSchema>
-type LeaveDraft = { id: string; name: string; initials: string; type: string; dates: string; days: number; status: "pending"; tone: string }
+export type LeaveDraft = { id: string; name: string; initials: string; type: string; dates: string; days: number; status: "pending"; tone: string; startDate: string; endDate: string; remarks: string }
 
 export function LeaveRequestForm({ onSubmit }: { onSubmit: (leave: LeaveDraft) => void }) {
   const { register, handleSubmit, formState: { errors, isSubmitting }, reset } = useForm<FormValues>({
@@ -31,9 +30,8 @@ export function LeaveRequestForm({ onSubmit }: { onSubmit: (leave: LeaveDraft) =
     const start = new Date(`${values.startDate}T00:00:00`)
     const end = new Date(`${values.endDate}T00:00:00`)
     const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1
-    onSubmit({ id: `leave-${Date.now()}`, name: "Arjun Singh", initials: "AS", type: values.type, dates: `${start.toLocaleDateString("en-IN", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-IN", { month: "short", day: "numeric" })}`, days, status: "pending", tone: "bg-[#d8efbd] text-[#3c6c32]" })
+    onSubmit({ id: `leave-${Date.now()}`, name: "Arjun Singh", initials: "AS", type: values.type, dates: `${start.toLocaleDateString("en-IN", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-IN", { month: "short", day: "numeric" })}`, days, status: "pending", tone: "bg-[#d8efbd] text-[#3c6c32]", startDate: values.startDate, endDate: values.endDate, remarks: values.remarks ?? "" })
     reset()
-    toast.success("Leave request submitted for HR review")
   }
 
   return <form className="rounded-2xl border border-[#dfe5e0] bg-white p-5 shadow-sm sm:p-6" onSubmit={handleSubmit(submit)}>
