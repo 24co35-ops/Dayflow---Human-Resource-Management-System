@@ -61,3 +61,23 @@ The browser check confirmed that after the employee confirms a leave request, sw
 ## Kanban approval verification
 
 The HR leave workspace rendered the intended Pending / Approved / Rejected columns with accessible Approve and Reject buttons. Approving the new Arjun Singh request moved it into Approved, reduced Pending approvals from 02 to 01, and showed a success toast: “Leave approved and employee notified.”
+
+## Shivam GitHub authentication checkpoint
+
+The browser session is visibly signed in as `ShivamGawade-XS` and can access the Dayflow repository. GitHub’s device activation page is open under that account and awaits the one-time code from the pending CLI flow. Authentication must be completed before creating contributor-attributed commits.
+
+## Shivam CLI authorization result
+
+The browser session is authenticated as `ShivamGawade-XS`, but the pending CLI device code had expired before submission. GitHub rejected it with `reason=expired`; a fresh device code must be generated and entered promptly.
+
+## Fresh Shivam CLI authorization checkpoint
+
+A fresh device code was submitted successfully. GitHub now shows the `Authorize GitHub CLI` consent screen signed in as `ShivamGawade-XS`. The requested OAuth scope includes repository access, workflow-file updates, gists read/write, and organization/team read-only access. Authorization should be confirmed only after reviewing and accepting this scope.
+
+## Fresh device-auth retry
+
+A clean GitHub CLI device flow is active with a fresh code, and the browser is signed in as `ShivamGawade-XS` on the code-entry screen. The earlier attempt failed because its code expired; this retry is being completed immediately.
+
+## Fresh CLI OAuth consent checkpoint
+
+The fresh device code was accepted for the signed-in `ShivamGawade-XS` account. GitHub now shows a final `Authorize GitHub CLI` screen with existing access for creating gists, reading organization/team membership, full control of private repositories, and updating GitHub Action workflows. Final approval is required before the CLI session can be verified.
