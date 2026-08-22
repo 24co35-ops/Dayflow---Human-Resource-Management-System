@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -7,46 +8,57 @@ from fastapi import HTTPException
 sys.path.insert(0, str(Path(__file__).parents[1] / "backend"))
 
 from app.api.routes.dayflow import (  # noqa: E402
+    DemoActor,
     FlowMessage,
     LeaveCreate,
     LeaveReview,
     create_leave,
     flow_message,
+    get_attendance,
     review_leave,
 )
 
+EMPLOYEE_ACTOR = DemoActor(role="employee", profile_id="emp-001")
+HR_ACTOR = DemoActor(role="hr", profile_id="hr-001")
+
 
 def test_flow_drafts_known_leave_action() -> None:
-    response = flow_message(FlowMessage(message="I need two days of sick leave"))
+    response = flow_message(
+        FlowMessage(message="I need two days of sick leave"), actor=EMPLOYEE_ACTOR
+    )
     assert response.action is not None
     assert response.action["action"] == "apply_leave"
     assert response.action["data"]["leave_type"] == "sick"
 
 
 def test_leave_dates_cannot_run_backwards() -> None:
-    payload = LeaveCreate(leave_type="paid", start_date="2026-08-28", end_date="2026-08-27")
+    payload = LeaveCreate(
+        leave_type="paid", start_date="2026-08-28", end_date="2026-08-27"
+    )
     with pytest.raises(HTTPException) as error:
-        create_leave(payload)
+        create_leave(payload, actor=EMPLOYEE_ACTOR)
     assert error.value.status_code == 422
 
 
 def test_employee_cannot_review_leave() -> None:
     with pytest.raises(HTTPException) as error:
-        review_leave("leave-001", LeaveReview(status="approved"), role="employee")
+        review_leave(
+            "leave-001",
+            LeaveReview(status="approved"),
+            actor=EMPLOYEE_ACTOR,
+        )
     assert error.value.status_code == 403
 
 
 def test_unknown_profile_is_not_silently_replaced() -> None:
-    from app.api.routes.dayflow import get_attendance
-
     with pytest.raises(HTTPException) as error:
-        get_attendance(role="employee", profile_id="missing-profile")
+        get_attendance(
+            actor=DemoActor(role="employee", profile_id="missing-profile")
+        )
     assert error.value.status_code == 404
 
 
 def test_check_out_calculates_worked_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
-    from datetime import datetime, timezone
-
     import app.api.routes.dayflow as dayflow
 
     check_in_at = datetime.now(timezone.utc)
@@ -58,7 +70,7 @@ def test_check_out_calculates_worked_minutes(monkeypatch: pytest.MonkeyPatch) ->
         check_in_at=check_in_at,
     )
     monkeypatch.setattr(dayflow, "attendance", [record])
-    result = dayflow.check_out("emp-001")
+    result = dayflow.check_out(actor=EMPLOYEE_ACTOR)
     assert result.check_out_at is not None
     assert result.worked_minutes >= 0
 
@@ -82,14 +94,19 @@ def test_overlapping_leave_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
                 leave_type="sick",
                 start_date="2026-08-21",
                 end_date="2026-08-21",
-            )
+            ),
+            actor=EMPLOYEE_ACTOR,
         )
     assert error.value.status_code == 409
 
 
 def test_rejection_requires_a_comment() -> None:
     with pytest.raises(HTTPException) as error:
-        review_leave("leave-001", LeaveReview(status="rejected"), role="hr")
+        review_leave(
+            "leave-001",
+            LeaveReview(status="rejected"),
+            actor=HR_ACTOR,
+        )
     assert error.value.status_code == 422
 
 
@@ -111,7 +128,7 @@ def test_non_pending_leave_cannot_be_reviewed(monkeypatch: pytest.MonkeyPatch) -
         dayflow.review_leave(
             "leave-approved",
             LeaveReview(status="rejected", review_comment="Changed plans"),
-            role="hr",
+            actor=HR_ACTOR,
         )
     assert error.value.status_code == 409
 
@@ -126,4 +143,4 @@ def test_supabase_profile_policy_blocks_role_escalation() -> None:
     assert 'create policy "profile self update"' not in migration
     assert 'create policy "profile self update safe"' in migration
     assert "prevent_profile_privilege_escalation" in migration
-    assert 'new.role is distinct from old.role' in migration
+    assert "new.role is distinct from old.role" in migration

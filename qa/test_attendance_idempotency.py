@@ -1,9 +1,11 @@
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parents[1] / "backend"))
-from app.api.routes.dayflow import check_in
+from app.api.routes.dayflow import DemoActor, check_in
+
 
 def test_check_in_returns_same_daily_record():
-    first = check_in("emp-001")
-    second = check_in("emp-001")
+    actor = DemoActor(role="employee", profile_id="emp-001")
+    first = check_in(actor=actor)
+    second = check_in(actor=actor)
     assert first.id == second.id

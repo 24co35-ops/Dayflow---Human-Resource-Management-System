@@ -1,13 +1,47 @@
+import os
 from datetime import date, datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/dayflow", tags=["dayflow"])
 
 Role = Literal["employee", "hr", "admin"]
 LeaveStatus = Literal["pending", "approved", "rejected"]
+
+
+class DemoActor(BaseModel):
+    role: Role
+    profile_id: str
+
+
+def get_dayflow_actor(
+    x_dayflow_demo_role: Role | None = Header(default=None),
+    x_dayflow_demo_profile_id: str | None = Header(default=None),
+) -> DemoActor:
+    """Resolve the actor only for the explicit local demo adapter.
+
+    Production deployments must replace this dependency with a verified JWT/session
+    dependency. Query-string role/profile values are deliberately ignored here.
+    """
+    if os.getenv("DAYFLOW_DEMO_MODE", "false").lower() != "true":
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated Dayflow actor required; demo actor headers are disabled",
+        )
+    if not x_dayflow_demo_role or not x_dayflow_demo_profile_id:
+        raise HTTPException(status_code=401, detail="Dayflow demo actor headers are required")
+    if x_dayflow_demo_role in ("hr", "admin") and x_dayflow_demo_profile_id != "hr-001":
+        raise HTTPException(status_code=403, detail="Demo actor/profile mismatch")
+    if x_dayflow_demo_role == "employee" and x_dayflow_demo_profile_id not in {
+        "emp-001",
+        "emp-002",
+        "emp-003",
+        "emp-004",
+    }:
+        raise HTTPException(status_code=403, detail="Demo actor/profile mismatch")
+    return DemoActor(role=x_dayflow_demo_role, profile_id=x_dayflow_demo_profile_id)
 
 
 class Profile(BaseModel):
@@ -208,9 +242,9 @@ def _overlaps(left_start: date, left_end: date, right_start: date, right_end: da
 
 
 @router.get("/me", response_model=Profile)
-def get_me(role: Role = "employee") -> Profile:
-    """Return the fictional identity only while the explicit demo adapter is active."""
-    if role == "hr":
+def get_me(actor: DemoActor = Depends(get_dayflow_actor)) -> Profile:
+    """Return the actor-resolved identity while the explicit demo adapter is active."""
+    if actor.role == "hr":
         return Profile(
             id="hr-001",
             employee_code="HR-001",
@@ -220,14 +254,16 @@ def get_me(role: Role = "employee") -> Profile:
             department="People Ops",
             job_position="People Operations Lead",
         )
-    return profiles[0]
+    return _profile(actor.profile_id)
 
 
 @router.get("/dashboard")
-def get_dashboard(role: Role = "employee") -> dict[str, object]:
+def get_dashboard(
+    actor: DemoActor = Depends(get_dayflow_actor),
+) -> dict[str, object]:
     pending = sum(request.status == "pending" for request in leave_requests)
     return {
-        "role": role,
+        "role": actor.role,
         "employee_count": len(profiles) + 1,
         "pending_leaves": pending,
         "present_today": sum(item.status == "present" for item in attendance),
@@ -250,10 +286,10 @@ def get_dashboard(role: Role = "employee") -> dict[str, object]:
 
 @router.get("/attendance", response_model=list[Attendance])
 def get_attendance(
-    role: Role = "employee", profile_id: str | None = None
+    actor: DemoActor = Depends(get_dayflow_actor), profile_id: str | None = None
 ) -> list[Attendance]:
-    if role not in ("hr", "admin"):
-        requested_profile = profile_id or "emp-001"
+    if actor.role not in ("hr", "admin"):
+        requested_profile = actor.profile_id
         _profile(requested_profile)
         return [item for item in attendance if item.profile_id == requested_profile]
     if profile_id is not None:
@@ -263,7 +299,8 @@ def get_attendance(
 
 
 @router.post("/attendance/check-in", response_model=Attendance)
-def check_in(profile_id: str = "emp-001") -> Attendance:
+def check_in(actor: DemoActor = Depends(get_dayflow_actor)) -> Attendance:
+    profile_id = actor.profile_id
     profile = _profile(profile_id)
     existing = next(
         (
@@ -304,7 +341,8 @@ def check_in(profile_id: str = "emp-001") -> Attendance:
 
 
 @router.post("/attendance/check-out", response_model=Attendance)
-def check_out(profile_id: str = "emp-001") -> Attendance:
+def check_out(actor: DemoActor = Depends(get_dayflow_actor)) -> Attendance:
+    profile_id = actor.profile_id
     profile = _profile(profile_id)
     record = next(
         (
@@ -335,22 +373,24 @@ def check_out(profile_id: str = "emp-001") -> Attendance:
 
 @router.get("/activity", response_model=list[ActivityEvent])
 def get_activity(
-    role: Role = "employee", profile_id: str | None = None
+    actor: DemoActor = Depends(get_dayflow_actor), profile_id: str | None = None
 ) -> list[ActivityEvent]:
-    if role in ("hr", "admin"):
+    if actor.role in ("hr", "admin"):
         if profile_id is not None:
             _profile(profile_id)
             return [event for event in activity_events if event.actor_id == profile_id]
         return activity_events
-    requested_profile = profile_id or "emp-001"
+    requested_profile = actor.profile_id
     _profile(requested_profile)
     return [event for event in activity_events if event.actor_id == requested_profile]
 
 
 @router.post("/leave-requests", response_model=LeaveRequest, status_code=201)
 def create_leave(
-    payload: LeaveCreate, profile_id: str = "emp-001"
+    payload: LeaveCreate,
+    actor: DemoActor = Depends(get_dayflow_actor),
 ) -> LeaveRequest:
+    profile_id = actor.profile_id
     profile = _profile(profile_id)
     payload.validate_dates()
     if any(
@@ -389,23 +429,25 @@ def create_leave(
 
 @router.get("/leave-requests", response_model=list[LeaveRequest])
 def get_leave_requests(
-    role: Role = "employee", profile_id: str | None = None
+    actor: DemoActor = Depends(get_dayflow_actor), profile_id: str | None = None
 ) -> list[LeaveRequest]:
-    if role in ("hr", "admin"):
+    if actor.role in ("hr", "admin"):
         if profile_id is not None:
             _profile(profile_id)
             return [item for item in leave_requests if item.profile_id == profile_id]
         return leave_requests
-    requested_profile = profile_id or "emp-001"
+    requested_profile = actor.profile_id
     _profile(requested_profile)
     return [item for item in leave_requests if item.profile_id == requested_profile]
 
 
 @router.patch("/leave-requests/{request_id}", response_model=LeaveRequest)
 def review_leave(
-    request_id: str, payload: LeaveReview, role: Role = "hr"
+    request_id: str,
+    payload: LeaveReview,
+    actor: DemoActor = Depends(get_dayflow_actor),
 ) -> LeaveRequest:
-    if role not in ("hr", "admin"):
+    if actor.role not in ("hr", "admin"):
         raise HTTPException(status_code=403, detail="Only HR or Admin can review leave")
     request = next((item for item in leave_requests if item.id == request_id), None)
     if request is None:
@@ -417,7 +459,7 @@ def review_leave(
             status_code=422,
             detail="A review comment is required when rejecting leave",
         )
-    reviewer_id = "hr-001"
+    reviewer_id = actor.profile_id
     request.status = payload.status
     request.review_comment = payload.review_comment.strip()
     request.reviewer_id = reviewer_id
@@ -433,7 +475,10 @@ def review_leave(
 
 
 @router.post("/flow/message", response_model=FlowResponse)
-def flow_message(payload: FlowMessage, role: Role = "employee") -> FlowResponse:
+def flow_message(
+    payload: FlowMessage,
+    actor: DemoActor = Depends(get_dayflow_actor),
+) -> FlowResponse:
     message = payload.message.lower()
     if "leave" in message or "off" in message or "sick" in message:
         return FlowResponse(
@@ -457,5 +502,5 @@ def flow_message(payload: FlowMessage, role: Role = "employee") -> FlowResponse:
             answer="The latest payroll snapshot is ready. Net salary is ₹51,800 after PF and professional tax deductions."
         )
     return FlowResponse(
-        answer=f"I’m Flow. I can help with attendance, leave, payroll, or your profile. You are signed in as {role}."
+        answer=f"I’m Flow. I can help with attendance, leave, payroll, or your profile. You are signed in as {actor.role}."
     )

@@ -1,6 +1,9 @@
+import os
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
+
+os.environ.setdefault("DAYFLOW_DEMO_MODE", "true")
 
 import pytest
 from fastapi import FastAPI
@@ -20,19 +23,38 @@ def client() -> TestClient:
     return TestClient(app_for_tests)
 
 
-def test_http_unknown_profile_is_not_replaced(client: TestClient) -> None:
+def test_http_query_profile_cannot_change_actor_scope(client: TestClient) -> None:
     response = client.get(
         "/api/v1/dayflow/attendance",
-        params={"role": "employee", "profile_id": "not-a-profile"},
+        headers={
+            "X-Dayflow-Demo-Role": "employee",
+            "X-Dayflow-Demo-Profile-Id": "emp-001",
+        },
+        params={"role": "hr", "profile_id": "not-a-profile"},
     )
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Profile not found"
+    assert response.status_code == 200
+    assert all(item["profile_id"] == "emp-001" for item in response.json())
+
+
+def test_http_unknown_actor_profile_is_rejected(client: TestClient) -> None:
+    response = client.get(
+        "/api/v1/dayflow/attendance",
+        headers={
+            "X-Dayflow-Demo-Role": "employee",
+            "X-Dayflow-Demo-Profile-Id": "not-a-profile",
+        },
+    )
+    assert response.status_code == 403
 
 
 def test_http_employee_cannot_review_leave(client: TestClient) -> None:
     response = client.patch(
         "/api/v1/dayflow/leave-requests/leave-001",
-        params={"role": "employee"},
+        headers={
+            "X-Dayflow-Demo-Role": "employee",
+            "X-Dayflow-Demo-Profile-Id": "emp-001",
+        },
+        params={"role": "hr"},
         json={"status": "approved"},
     )
     assert response.status_code == 403
@@ -44,6 +66,10 @@ def test_http_check_out_requires_check_in(
     monkeypatch.setattr(dayflow, "attendance", [])
     response = client.post(
         "/api/v1/dayflow/attendance/check-out",
+        headers={
+            "X-Dayflow-Demo-Role": "employee",
+            "X-Dayflow-Demo-Profile-Id": "emp-001",
+        },
         params={"profile_id": "emp-001"},
     )
     assert response.status_code == 409
@@ -62,12 +88,18 @@ def test_http_check_in_then_check_out_is_idempotent(
         check_in_at=check_in_at,
     )
     monkeypatch.setattr(dayflow, "attendance", [record])
+    actor_headers = {
+        "X-Dayflow-Demo-Role": "employee",
+        "X-Dayflow-Demo-Profile-Id": "emp-001",
+    }
     first = client.post(
         "/api/v1/dayflow/attendance/check-out",
+        headers=actor_headers,
         params={"profile_id": "emp-001"},
     )
     second = client.post(
         "/api/v1/dayflow/attendance/check-out",
+        headers=actor_headers,
         params={"profile_id": "emp-001"},
     )
     assert first.status_code == 200
@@ -90,6 +122,10 @@ def test_http_leave_overlap_is_rejected(
     monkeypatch.setattr(dayflow, "leave_requests", [existing])
     response = client.post(
         "/api/v1/dayflow/leave-requests",
+        headers={
+            "X-Dayflow-Demo-Role": "employee",
+            "X-Dayflow-Demo-Profile-Id": "emp-001",
+        },
         params={"profile_id": "emp-001"},
         json={
             "leave_type": "sick",
@@ -100,3 +136,22 @@ def test_http_leave_overlap_is_rejected(
     )
     assert response.status_code == 409
     assert "overlap" in response.json()["detail"].lower()
+
+
+def test_http_requires_explicit_demo_actor(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DAYFLOW_DEMO_MODE", raising=False)
+    response = client.get("/api/v1/dayflow/me")
+    assert response.status_code == 401
+
+
+def test_http_rejects_role_profile_mismatch(client: TestClient) -> None:
+    response = client.get(
+        "/api/v1/dayflow/me",
+        headers={
+            "X-Dayflow-Demo-Role": "hr",
+            "X-Dayflow-Demo-Profile-Id": "emp-001",
+        },
+    )
+    assert response.status_code == 403
