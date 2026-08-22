@@ -13,6 +13,7 @@ import {
   WalletCards,
 } from "lucide-react"
 
+import { MobileWorkspaceNav } from "@/components/MobileWorkspaceNav"
 import { supabaseMode } from "@/lib/supabase"
 
 export const Route = createFileRoute("/_layout")({
@@ -81,6 +82,7 @@ function Layout() {
             </div>
           </div>
         </header>
+        <MobileWorkspaceNav />
         <main className="mx-auto max-w-[1500px] p-5 sm:p-8"><Outlet /></main>
       </div>
     </div>
