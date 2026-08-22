@@ -100,7 +100,7 @@ class Item(ItemBase, table=True):
     owner_id: uuid.UUID = Field(
         foreign_key="user.id", nullable=False, ondelete="CASCADE"
     )
-    owner: User | None = Relationship(back_populates="items")
+    owner: User | None = Relationship(sa_relationship=relationship("User", back_populates="items"))
 
 
 # Properties to return via API, id is always required
