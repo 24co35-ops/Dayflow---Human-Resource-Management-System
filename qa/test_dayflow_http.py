@@ -138,6 +138,32 @@ def test_http_leave_overlap_is_rejected(
     assert "overlap" in response.json()["detail"].lower()
 
 
+def test_http_people_directory_is_hr_only(client: TestClient) -> None:
+    employee_response = client.get(
+        "/api/v1/dayflow/people",
+        headers={
+            "X-Dayflow-Demo-Role": "employee",
+            "X-Dayflow-Demo-Profile-Id": "emp-001",
+        },
+    )
+    assert employee_response.status_code == 403
+
+    hr_response = client.get(
+        "/api/v1/dayflow/people",
+        headers={
+            "X-Dayflow-Demo-Role": "hr",
+            "X-Dayflow-Demo-Profile-Id": "hr-001",
+        },
+    )
+    assert hr_response.status_code == 200
+    assert {person["id"] for person in hr_response.json()} == {
+        "emp-001",
+        "emp-002",
+        "emp-003",
+        "emp-004",
+    }
+
+
 def test_http_payroll_is_actor_scoped(client: TestClient) -> None:
     employee_response = client.get(
         "/api/v1/dayflow/payroll",
