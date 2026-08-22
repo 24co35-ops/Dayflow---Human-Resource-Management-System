@@ -13,6 +13,8 @@ import {
   WalletCards,
 } from "lucide-react"
 
+import { useEffect, useState } from "react"
+
 import { MobileWorkspaceNav } from "@/components/MobileWorkspaceNav"
 import { supabaseMode } from "@/lib/supabase"
 
@@ -28,7 +30,34 @@ const navigation = [
   { label: "Payroll", icon: WalletCards },
 ]
 
+type DemoRole = "employee" | "hr"
+
+const navigationSlug = (label: string) =>
+  label.toLowerCase().replace(/ & /g, "-").replace(/\s+/g, "-")
+
 function Layout() {
+  const [activeSlug, setActiveSlug] = useState("overview")
+  const [demoRole, setDemoRole] = useState<DemoRole>("employee")
+
+  useEffect(() => {
+    const syncShell = () => {
+      setActiveSlug(window.location.hash.replace("#", "") || "overview")
+      const savedRole = window.localStorage.getItem("dayflow-demo-role")
+      if (savedRole === "employee" || savedRole === "hr") setDemoRole(savedRole)
+    }
+    syncShell()
+    window.addEventListener("hashchange", syncShell)
+    window.addEventListener("dayflow-role-change", syncShell)
+    return () => {
+      window.removeEventListener("hashchange", syncShell)
+      window.removeEventListener("dayflow-role-change", syncShell)
+    }
+  }, [])
+
+  const shellUser = demoRole === "hr"
+    ? { name: "Ashwith Shetty", role: "People Ops" }
+    : { name: "Arjun Singh", role: "Engineering" }
+
   return (
     <div className="min-h-screen bg-[#f6f7f4] text-[#111c2e]">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-[244px] flex-col border-r border-[#dfe5e0] bg-[#0e1c2f] text-white lg:flex">
@@ -43,21 +72,24 @@ function Layout() {
         </div>
         <div className="px-4 pt-7 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">Workspace</div>
         <nav className="mt-3 space-y-1 px-3">
-          {navigation.map(({ label, icon: Icon }, index) => (
+          {navigation.map(({ label, icon: Icon }) => {
+            const isActive = activeSlug === navigationSlug(label)
+            return (
             <button
               key={label}
-              className={`group flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm transition ${index === 0 ? "bg-white/10 text-white" : "text-white/55 hover:bg-white/7 hover:text-white"}`}
+              className={`group flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm transition ${isActive ? "bg-white/10 text-white" : "text-white/55 hover:bg-white/7 hover:text-white"}`}
               onClick={() => {
-                window.location.hash = label.toLowerCase().replace(/ & /g, "-").replace(/\s+/g, "-")
+                window.location.hash = navigationSlug(label)
                 window.dispatchEvent(new HashChangeEvent("hashchange"))
               }}
               type="button"
             >
-              <Icon className={`size-[18px] ${index === 0 ? "text-[#c7f36b]" : "text-white/45 group-hover:text-[#c7f36b]"}`} />
+              <Icon className={`size-[18px] ${isActive ? "text-[#c7f36b]" : "text-white/45 group-hover:text-[#c7f36b]"}`} />
               <span>{label}</span>
               {label === "Leave & time off" && <span className="ml-auto rounded-full bg-[#efbb54] px-2 py-0.5 text-[10px] font-bold text-[#0e1c2f]">3</span>}
             </button>
-          ))}
+          )
+          })}
         </nav>
         <div className="mt-auto px-4 pb-6">
           <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -77,7 +109,7 @@ function Layout() {
             <button className="relative grid size-10 place-items-center rounded-xl border border-[#dfe5e0] bg-white text-[#5d6876] transition hover:border-[#b8c5bd]" type="button"><Bell className="size-[18px]" /><span className="absolute right-2 top-2 size-1.5 rounded-full bg-[#eb6e5c]" /></button>
             <div className="flex items-center gap-2 rounded-xl border border-[#dfe5e0] bg-white py-1.5 pl-1.5 pr-2">
               <div className="grid size-8 place-items-center rounded-lg bg-[#f2c4ae] text-xs font-bold text-[#6e3222]">AS</div>
-              <div className="hidden text-left sm:block"><div className="text-xs font-semibold">Ashwith Shetty</div><div className="text-[10px] text-[#7b8792]">People Ops</div></div>
+              <div className="hidden text-left sm:block"><div className="text-xs font-semibold">{shellUser.name}</div><div className="text-[10px] text-[#7b8792]">{shellUser.role}</div></div>
               <ChevronDown className="size-3.5 text-[#7b8792]" />
             </div>
           </div>

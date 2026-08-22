@@ -140,6 +140,13 @@ function Dashboard() {
 
   const selectView = (next: View) => setView(next)
 
+  const changeRole = (next: Role) => {
+    setRole(next)
+    setView("Overview")
+    window.localStorage.setItem("dayflow-demo-role", next)
+    window.dispatchEvent(new CustomEvent("dayflow-role-change"))
+  }
+
   return (
     <div className="space-y-7">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -150,8 +157,8 @@ function Dashboard() {
         </div>
         <div className="flex items-center gap-2">
           <div className="rounded-xl border border-[#dfe5e0] bg-white p-1 text-xs shadow-sm">
-            <button className={cn("rounded-lg px-3 py-2 font-semibold transition", role === "employee" ? "bg-[#0e1c2f] text-white" : "text-[#78838d]")} onClick={() => { setRole("employee"); setView("Overview") }} type="button">Employee view</button>
-            <button className={cn("rounded-lg px-3 py-2 font-semibold transition", role === "hr" ? "bg-[#0e1c2f] text-white" : "text-[#78838d]")} onClick={() => { setRole("hr"); setView("Overview") }} type="button">HR view</button>
+            <button className={cn("rounded-lg px-3 py-2 font-semibold transition", role === "employee" ? "bg-[#0e1c2f] text-white" : "text-[#78838d]")} onClick={() => changeRole("employee")} type="button">Employee view</button>
+            <button className={cn("rounded-lg px-3 py-2 font-semibold transition", role === "hr" ? "bg-[#0e1c2f] text-white" : "text-[#78838d]")} onClick={() => changeRole("hr")} type="button">HR view</button>
           </div>
           <Button className="hidden rounded-xl bg-[#c7f36b] text-[#0e1c2f] shadow-sm hover:bg-[#b5e958] sm:flex" onClick={() => setFlowOpen(true)}><Sparkles className="mr-2 size-4" /> Ask Flow</Button>
         </div>
